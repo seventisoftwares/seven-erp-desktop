@@ -1,0 +1,122 @@
+openapi: 3.1.0
+info:
+  title: Seven Cloud Sync API
+  version: 2026-08-16
+  description: API multiempresa para pareamento e sincronização offline do Seven ERP Desktop.
+servers:
+  - url: https://seven-erp.marcoopiovezanaa.chatgpt.site
+security:
+  - deviceToken: []
+paths:
+  /api/dashboard:
+    get:
+      summary: Retorna indicadores calculados somente a partir da base da empresa
+      responses:
+        '200': { description: Indicadores, ordens recentes e próximos vencimentos }
+  /api/sync/pair:
+    post:
+      summary: Autoriza uma instalação com código de uso único
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PairRequest'
+      responses:
+        '201':
+          description: Token individual retornado uma única vez
+        '401':
+          description: Código inválido, utilizado ou expirado
+  /api/sync/status:
+    get:
+      summary: Valida o token e a conectividade
+      responses:
+        '200': { description: Dispositivo autorizado }
+        '401': { description: Token inválido ou revogado }
+  /api/sync/bootstrap:
+    get:
+      summary: Obtém snapshot inicial ou alterações após o cursor
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: Snapshot e log incremental, limitado a 500 alterações
+  /api/customers:
+    get:
+      summary: Lista clientes da empresa do token
+      responses:
+        '200': { description: Lista de clientes }
+    post:
+      summary: Cadastra cliente com idempotência
+      parameters:
+        - $ref: '#/components/parameters/OperationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [legalName] }
+      responses:
+        '201': { description: Cliente criado }
+  /api/integrations:
+    get:
+      summary: Lista configurações e estados das integrações da empresa
+      responses:
+        '200': { description: Conectores, políticas e indicadores reais }
+    post:
+      summary: Salva ou valida uma configuração sem receber segredos
+      responses:
+        '200': { description: Configuração atualizada ou validada }
+        '201': { description: Configuração criada }
+    delete:
+      summary: Remove a configuração de um conector e registra auditoria
+      responses:
+        '200': { description: Resultado da remoção }
+  /api/nfe-drafts:
+    get:
+      summary: Lista rascunhos de NF-e e prontidão fiscal
+      responses:
+        '200': { description: Rascunhos da empresa }
+    post:
+      summary: Salva rascunho de NF-e com idempotência
+      parameters:
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '201': { description: Rascunho salvo }
+        '422': { description: Transmissão bloqueada até a configuração fiscal oficial }
+  /api/recipient-manifestations:
+    get:
+      summary: Lista documentos recebidos e manifestações
+      responses:
+        '200': { description: Documentos e eventos }
+    post:
+      summary: Salva manifestação do destinatário com idempotência
+      parameters:
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '201': { description: Evento salvo como rascunho }
+components:
+  securitySchemes:
+    deviceToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+  parameters:
+    OperationId:
+      name: x-seven-operation-id
+      in: header
+      required: true
+      description: UUID estável da operação; impede duplicação após reconexões.
+      schema: { type: string, minLength: 16, maxLength: 160 }
+  schemas:
+    PairRequest:
+      type: object
+      required: [code, deviceName, installationId, platform]
+      properties:
+        code: { type: string, pattern: '^[A-Z0-9]{8}$' }
+        deviceName: { type: string, maxLength: 80 }
+        installationId: { type: string, maxLength: 120 }
+        platform: { type: string, maxLength: 30 }
+        appVersion: { type: string, maxLength: 30 }

@@ -1,0 +1,121 @@
+CREATE TABLE `fiscal_establishments` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`legal_name` text NOT NULL,
+	`trade_name` text,
+	`tax_id` text NOT NULL,
+	`state_registration` text,
+	`municipal_registration` text,
+	`tax_regime` text DEFAULT 'simples_nacional' NOT NULL,
+	`cnae` text,
+	`city_code` text,
+	`state` text DEFAULT 'RS' NOT NULL,
+	`nfe_series` text DEFAULT '1' NOT NULL,
+	`next_nfe_number` integer DEFAULT 1 NOT NULL,
+	`environment` text DEFAULT 'homologation' NOT NULL,
+	`certificate_reference` text,
+	`certificate_expires_at` text,
+	`credential_status` text DEFAULT 'pending' NOT NULL,
+	`tax_profile_status` text DEFAULT 'pending' NOT NULL,
+	`status` text DEFAULT 'configuration_pending' NOT NULL,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organizations`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `fiscal_establishments_org_tax_idx` ON `fiscal_establishments` (`organization_id`,`tax_id`);--> statement-breakpoint
+CREATE TABLE `fiscal_transmission_queue` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`fiscal_document_id` text,
+	`nfe_draft_id` text,
+	`operation` text DEFAULT 'authorization' NOT NULL,
+	`environment` text DEFAULT 'homologation' NOT NULL,
+	`status` text DEFAULT 'blocked' NOT NULL,
+	`endpoint_version` text DEFAULT '4.00' NOT NULL,
+	`schema_version` text DEFAULT '010e_v1.01' NOT NULL,
+	`attempts` integer DEFAULT 0 NOT NULL,
+	`max_attempts` integer DEFAULT 5 NOT NULL,
+	`next_attempt_at` text,
+	`credential_reference` text,
+	`idempotency_key` text NOT NULL,
+	`last_error` text,
+	`request_reference` text,
+	`response_json` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organizations`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`fiscal_document_id`) REFERENCES `fiscal_documents`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`nfe_draft_id`) REFERENCES `nfe_drafts`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `fiscal_queue_org_idempotency_idx` ON `fiscal_transmission_queue` (`organization_id`,`idempotency_key`);--> statement-breakpoint
+CREATE INDEX `fiscal_queue_org_status_idx` ON `fiscal_transmission_queue` (`organization_id`,`status`,`next_attempt_at`);--> statement-breakpoint
+CREATE TABLE `nfe_draft_items` (
+	`id` text PRIMARY KEY NOT NULL,
+	`draft_id` text NOT NULL,
+	`item_number` integer NOT NULL,
+	`catalog_item_id` text,
+	`description` text NOT NULL,
+	`ncm` text NOT NULL,
+	`cest` text,
+	`cfop` text NOT NULL,
+	`unit` text DEFAULT 'UN' NOT NULL,
+	`quantity_milli` integer NOT NULL,
+	`unit_price_cents` integer NOT NULL,
+	`total_cents` integer NOT NULL,
+	`origin` text DEFAULT '0' NOT NULL,
+	`cst` text,
+	`csosn` text,
+	`icms_json` text,
+	`pis_json` text,
+	`cofins_json` text,
+	`tax_reform_json` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`draft_id`) REFERENCES `nfe_drafts`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`catalog_item_id`) REFERENCES `catalog_items`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `nfe_draft_items_number_idx` ON `nfe_draft_items` (`draft_id`,`item_number`);--> statement-breakpoint
+CREATE INDEX `nfe_draft_items_draft_idx` ON `nfe_draft_items` (`draft_id`);--> statement-breakpoint
+CREATE TABLE `nfe_drafts` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`establishment_id` text,
+	`party_id` text,
+	`nature_operation` text NOT NULL,
+	`purpose` text DEFAULT 'normal' NOT NULL,
+	`operation_type` text DEFAULT 'output' NOT NULL,
+	`destination_type` text DEFAULT 'internal' NOT NULL,
+	`final_consumer` integer DEFAULT false NOT NULL,
+	`presence_indicator` text DEFAULT 'not_applicable' NOT NULL,
+	`freight_mode` text DEFAULT 'no_freight' NOT NULL,
+	`series` text DEFAULT '1' NOT NULL,
+	`environment` text DEFAULT 'homologation' NOT NULL,
+	`status` text DEFAULT 'draft' NOT NULL,
+	`recipient_name` text NOT NULL,
+	`recipient_tax_id` text NOT NULL,
+	`recipient_state_registration` text,
+	`recipient_email` text,
+	`recipient_state` text,
+	`recipient_city_code` text,
+	`products_total_cents` integer DEFAULT 0 NOT NULL,
+	`freight_cents` integer DEFAULT 0 NOT NULL,
+	`discount_cents` integer DEFAULT 0 NOT NULL,
+	`other_cents` integer DEFAULT 0 NOT NULL,
+	`total_cents` integer DEFAULT 0 NOT NULL,
+	`notes` text,
+	`validation_status` text DEFAULT 'pending' NOT NULL,
+	`validation_json` text,
+	`idempotency_key` text NOT NULL,
+	`created_by` text,
+	`created_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	`updated_at` text DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organizations`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`establishment_id`) REFERENCES `fiscal_establishments`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`party_id`) REFERENCES `parties`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `nfe_drafts_org_idempotency_idx` ON `nfe_drafts` (`organization_id`,`idempotency_key`);--> statement-breakpoint
+CREATE INDEX `nfe_drafts_org_status_idx` ON `nfe_drafts` (`organization_id`,`status`,`created_at`);

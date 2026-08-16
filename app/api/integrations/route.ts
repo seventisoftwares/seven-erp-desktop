@@ -1,0 +1,181 @@
+import { and, desc, eq } from "drizzle-orm";
+import { auditLogs, integrationConnections, syncChangeLog } from "../../../db/schema";
+import { ApiError, apiErrorResponse, ensureDefaultOrganization, resolveRequestIdentity } from "../../lib/sync-auth";
+
+const CONNECTORS = new Set([
+  "nfse_national",
+  "nfe_sefaz",
+  "nfe_distribution",
+  "cte_received",
+  "mdfe_received",
+  "banrisul",
+  "btg",
+  "certificate_partner",
+  "system_policies",
+]);
+const ENVIRONMENTS = new Set(["homologation", "production", "global"]);
+
+type SavePayload = {
+  action?: "save" | "validate";
+  connector?: string;
+  environment?: string;
+  credentialReference?: string;
+  configuration?: Record<string, unknown>;
+};
+
+function cleanText(value: unknown, maxLength = 500) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function cleanConfiguration(input: Record<string, unknown> | undefined) {
+  const output: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(input || {})) {
+    if (!/^[a-zA-Z][a-zA-Z0-9]{0,39}$/.test(key)) continue;
+    if (typeof value === "boolean") output[key] = value;
+    else if (typeof value === "number" && Number.isFinite(value)) output[key] = value;
+    else if (typeof value === "string") output[key] = value.trim().slice(0, 1000);
+  }
+  return output;
+}
+
+function parseConfiguration(value: string | null) {
+  try { return value ? JSON.parse(value) : {}; }
+  catch { return {}; }
+}
+
+export async function GET(request: Request) {
+  try {
+    const identity = await resolveRequestIdentity(request);
+    const db = await ensureDefaultOrganization();
+    const rows = await db.select().from(integrationConnections)
+      .where(eq(integrationConnections.organizationId, identity.organizationId))
+      .orderBy(desc(integrationConnections.updatedAt));
+    const connections = rows.map((row) => ({
+      ...row,
+      credentialReference: row.credentialReference || "",
+      configuration: parseConfiguration(row.configurationJson),
+      configurationJson: undefined,
+    }));
+    const operational = connections.filter((row) => row.connector !== "system_policies");
+    const fiscal = operational.find((row) => row.connector.startsWith("nf") || row.connector.endsWith("received"));
+    const lastCheck = operational.map((row) => row.lastHealthCheckAt).filter(Boolean).sort().at(-1) || null;
+    return Response.json({
+      connections,
+      summary: {
+        active: operational.filter((row) => row.status === "active").length,
+        configured: operational.filter((row) => row.status !== "not_configured").length,
+        fiscalEnvironment: fiscal?.environment || null,
+        lastCheck,
+      },
+    });
+  } catch (error) {
+    return apiErrorResponse(error, "Não foi possível consultar as integrações.");
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const payload = await request.json() as SavePayload;
+    const connector = cleanText(payload.connector, 60);
+    const environment = cleanText(payload.environment, 30) || "homologation";
+    if (!CONNECTORS.has(connector)) throw new ApiError("Conector inválido.", 400);
+    if (!ENVIRONMENTS.has(environment)) throw new ApiError("Ambiente inválido.", 400);
+    if (connector === "system_policies" && environment !== "global") throw new ApiError("As políticas devem usar o escopo global.", 400);
+
+    const identity = await resolveRequestIdentity(request);
+    if (identity.source === "desktop") throw new ApiError("Altere integrações pelo painel administrativo web.", 403);
+    const db = await ensureDefaultOrganization();
+    const [existing] = await db.select().from(integrationConnections).where(and(
+      eq(integrationConnections.organizationId, identity.organizationId),
+      eq(integrationConnections.connector, connector),
+      eq(integrationConnections.environment, environment),
+    )).limit(1);
+
+    if (payload.action === "validate") {
+      if (!existing) throw new ApiError("Salve a configuração antes de verificá-la.", 409);
+      const checkedAt = new Date().toISOString();
+      const credentialReady = Boolean(existing.credentialReference?.trim());
+      const nextStatus = connector === "system_policies" ? "configuration_saved" : credentialReady ? "ready_for_activation" : "validation_failed";
+      const lastError = connector !== "system_policies" && !credentialReady ? "Informe a referência da credencial armazenada no cofre seguro." : null;
+      await db.batch([
+        db.update(integrationConnections).set({ status: nextStatus, lastHealthCheckAt: checkedAt, lastError, updatedAt: checkedAt }).where(eq(integrationConnections.id, existing.id)),
+        db.insert(auditLogs).values({
+          id: crypto.randomUUID(), organizationId: identity.organizationId, actorEmail: identity.actorEmail,
+          action: "integration.configuration_validated", entityType: "integration_connection", entityId: existing.id,
+          beforeJson: JSON.stringify({ status: existing.status }), afterJson: JSON.stringify({ status: nextStatus, lastError }),
+          correlationId: request.headers.get("cf-ray"),
+        }),
+      ]);
+      return Response.json({ status: nextStatus, lastError, checkedAt, externalRequestPerformed: false });
+    }
+
+    const configuration = cleanConfiguration(payload.configuration);
+    const credentialReference = cleanText(payload.credentialReference, 200) || null;
+    const savedAt = new Date().toISOString();
+    const id = existing?.id || crypto.randomUUID();
+    const status = connector === "system_policies" || credentialReference ? "configuration_saved" : "configuration_pending";
+    const values = {
+      id,
+      organizationId: identity.organizationId,
+      connector,
+      environment,
+      status,
+      credentialReference,
+      configurationJson: JSON.stringify(configuration),
+      lastError: null,
+      updatedAt: savedAt,
+    };
+    const publicSnapshot = { ...values, credentialReference: credentialReference ? "configured" : null, configuration };
+    await db.batch([
+      existing
+        ? db.update(integrationConnections).set(values).where(eq(integrationConnections.id, existing.id))
+        : db.insert(integrationConnections).values(values),
+      db.insert(auditLogs).values({
+        id: crypto.randomUUID(), organizationId: identity.organizationId, actorEmail: identity.actorEmail,
+        action: "integration.configuration_saved", entityType: "integration_connection", entityId: id,
+        beforeJson: existing ? JSON.stringify({ connector: existing.connector, environment: existing.environment, status: existing.status }) : null,
+        afterJson: JSON.stringify(publicSnapshot), correlationId: request.headers.get("cf-ray"),
+      }),
+      db.insert(syncChangeLog).values({
+        organizationId: identity.organizationId, deviceId: identity.deviceId,
+        entityType: "integration_connection", entityId: id, action: "upsert", payloadJson: JSON.stringify(publicSnapshot),
+      }),
+    ]);
+    return Response.json({ connection: { ...values, configuration, configurationJson: undefined } }, { status: existing ? 200 : 201 });
+  } catch (error) {
+    return apiErrorResponse(error, "Não foi possível salvar a integração.");
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const payload = await request.json() as { connector?: string; environment?: string };
+    const connector = cleanText(payload.connector, 60);
+    const environment = cleanText(payload.environment, 30) || "homologation";
+    if (!CONNECTORS.has(connector) || !ENVIRONMENTS.has(environment)) throw new ApiError("Configuração inválida.", 400);
+    const identity = await resolveRequestIdentity(request);
+    if (identity.source === "desktop") throw new ApiError("Altere integrações pelo painel administrativo web.", 403);
+    const db = await ensureDefaultOrganization();
+    const [existing] = await db.select().from(integrationConnections).where(and(
+      eq(integrationConnections.organizationId, identity.organizationId),
+      eq(integrationConnections.connector, connector),
+      eq(integrationConnections.environment, environment),
+    )).limit(1);
+    if (!existing) return Response.json({ removed: false });
+    await db.batch([
+      db.delete(integrationConnections).where(eq(integrationConnections.id, existing.id)),
+      db.insert(auditLogs).values({
+        id: crypto.randomUUID(), organizationId: identity.organizationId, actorEmail: identity.actorEmail,
+        action: "integration.configuration_removed", entityType: "integration_connection", entityId: existing.id,
+        beforeJson: JSON.stringify({ connector, environment, status: existing.status }), correlationId: request.headers.get("cf-ray"),
+      }),
+      db.insert(syncChangeLog).values({
+        organizationId: identity.organizationId, deviceId: identity.deviceId,
+        entityType: "integration_connection", entityId: existing.id, action: "delete", payloadJson: JSON.stringify({ connector, environment }),
+      }),
+    ]);
+    return Response.json({ removed: true });
+  } catch (error) {
+    return apiErrorResponse(error, "Não foi possível remover a configuração.");
+  }
+}

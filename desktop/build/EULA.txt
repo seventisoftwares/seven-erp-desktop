@@ -1,0 +1,9 @@
+SEVEN ERP — LICENÇA DE USO
+
+Copyright © 2026 Seven TI Tecnologia & Serviços LTDA. Todos os direitos reservados.
+
+Este software é licenciado para uso interno da organização autorizada pela Seven TI. É proibida a redistribuição, engenharia reversa, sublicença ou disponibilização das credenciais de sincronização a terceiros.
+
+Os dados locais são mantidos no computador para permitir continuidade operacional sem internet. Quando a conexão retorna, as operações pendentes são sincronizadas com a infraestrutura Seven Cloud. O usuário é responsável por proteger o acesso físico ao computador e revogar equipamentos perdidos ou desativados.
+
+Documentos fiscais somente podem ser transmitidos após configuração, homologação e credenciamento oficial do emitente.

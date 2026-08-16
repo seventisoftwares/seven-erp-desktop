@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1786851250737,
+      "tag": "0000_normal_kang",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786876367773,
+      "tag": "0001_charming_zarek",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786877836352,
+      "tag": "0002_gorgeous_rawhide_kid",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786879507100,
+      "tag": "0003_steep_blur",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786883538185,
+      "tag": "0004_fixed_maestro",
+      "breakpoints": true
+    }
+  ]
+}
