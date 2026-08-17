@@ -9,11 +9,12 @@
   "main": "src/main.mjs",
   "scripts": {
     "dev": "vite",
+    "test:local-core": "node scripts/smoke-local-core.mjs",
     "build:renderer": "vite build",
-    "build:win": "npm run build:renderer && electron-builder --win nsis --x64",
-    "build:mac": "npm run build:renderer && electron-builder --mac dmg zip --universal",
-    "pack:local": "npm run build:renderer && electron-builder --dir",
-    "start": "npm run build:renderer && electron ."
+    "build:win": "npm run test:local-core && npm run build:renderer && electron-builder --win nsis --x64",
+    "build:mac": "npm run test:local-core && npm run build:renderer && electron-builder --mac dmg zip --universal",
+    "pack:local": "npm run test:local-core && npm run build:renderer && electron-builder --dir",
+    "start": "npm run test:local-core && npm run build:renderer && electron ."
   },
   "dependencies": {
     "react": "^19.2.0",
