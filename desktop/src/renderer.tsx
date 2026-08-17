@@ -54,14 +54,21 @@ function PairingScreen({ status, onPaired }: { status: SevenDesktopStatus; onPai
 
 function DesktopApp() {
   const [status, setStatus] = useState<SevenDesktopStatus | null>(null);
+  const [startupError, setStartupError] = useState("");
   useEffect(() => {
     const bridge = window.sevenDesktop;
-    if (!bridge) return;
+    if (!bridge) {
+      setStartupError("A integração segura do aplicativo não foi carregada. Reinstale a versão mais recente do Seven ERP.");
+      return;
+    }
     let active = true;
-    bridge.getStatus().then((value) => active && setStatus(value));
+    bridge.getStatus()
+      .then((value) => active && setStatus(value))
+      .catch((error) => active && setStartupError(error instanceof Error ? error.message : "Falha ao preparar o ambiente seguro."));
     const unsubscribe = bridge.onStatus((value) => active && setStatus(value));
     return () => { active = false; unsubscribe(); };
   }, []);
+  if (startupError) return <div className="desktop-loading"><span>!</span><strong>Seven ERP</strong><small>{startupError}</small></div>;
   if (!status) return <div className="desktop-loading"><span>S</span><strong>Seven ERP</strong><small>Preparando ambiente seguro...</small></div>;
   if (!status.paired) return <PairingScreen status={status} onPaired={() => window.sevenDesktop!.getStatus().then(setStatus)} />;
   return <SevenErpApp />;
