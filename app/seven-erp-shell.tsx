@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import SevenErpApp from "./seven-erp-app";
 import ServiceOrdersModule from "./service-orders-module";
 import IntegrationsModuleV2 from "./integrations-module-v2";
+import MeshDevicesModule from "./mesh-devices-module";
 import "./erp-enhancements.css";
 
-type EnhancedModule = "service" | "integrations" | null;
+type EnhancedModule = "service" | "integrations" | "devices" | null;
 
 export default function SevenErpShell() {
   const [enhancedModule, setEnhancedModule] = useState<EnhancedModule>(null);
@@ -19,16 +20,13 @@ export default function SevenErpShell() {
       const label = (button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
 
       if (label.includes("integrações e ajustes")) {
-        event.preventDefault();
-        event.stopPropagation();
-        setEnhancedModule("integrations");
-        return;
+        event.preventDefault(); event.stopPropagation(); setEnhancedModule("integrations"); return;
       }
       if (label.includes("ordem de serviço") || label.includes("ordens de serviço")) {
-        event.preventDefault();
-        event.stopPropagation();
-        setEnhancedModule("service");
-        return;
+        event.preventDefault(); event.stopPropagation(); setEnhancedModule("service"); return;
+      }
+      if (label.includes("dispositivos e sincronização")) {
+        event.preventDefault(); event.stopPropagation(); setEnhancedModule("devices"); return;
       }
 
       if (enhancedModule && button.closest(".main-nav, .sidebar-footer")) setEnhancedModule(null);
@@ -41,9 +39,9 @@ export default function SevenErpShell() {
   return <div className="seven-erp-shell">
     <SevenErpApp />
     {enhancedModule && <div className="seven-enhancement-overlay">
-      {enhancedModule === "service"
-        ? <ServiceOrdersModule onClose={() => setEnhancedModule(null)} />
-        : <IntegrationsModuleV2 onClose={() => setEnhancedModule(null)} />}
+      {enhancedModule === "service" ? <ServiceOrdersModule onClose={() => setEnhancedModule(null)} />
+        : enhancedModule === "integrations" ? <IntegrationsModuleV2 onClose={() => setEnhancedModule(null)} />
+        : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
     </div>}
   </div>;
 }
