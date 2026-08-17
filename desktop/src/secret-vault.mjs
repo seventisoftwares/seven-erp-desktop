@@ -29,7 +29,7 @@ export function createSecretVault({ dataDir }) {
     }
     const encrypted = safeStorage.encryptString(JSON.stringify(merged));
     await writeFile(path.join(dir, `${name}.bin`), encrypted, { mode: 0o600 });
-    return { stored: Object.keys(merged), connector: name, certificateId: merged.certificateId || null };
+    return status(connector);
   }
 
   async function status(connector) {
@@ -39,6 +39,9 @@ export function createSecretVault({ dataDir }) {
       stored: Object.keys(secrets),
       configured: Object.keys(secrets).length > 0,
       certificateId: typeof secrets.certificateId === "string" ? secrets.certificateId : null,
+      localValidationStatus: typeof secrets.localValidationStatus === "string" ? secrets.localValidationStatus : null,
+      localValidationMessage: typeof secrets.localValidationMessage === "string" ? secrets.localValidationMessage : null,
+      localValidatedAt: typeof secrets.localValidatedAt === "string" ? secrets.localValidatedAt : null,
     };
   }
 
