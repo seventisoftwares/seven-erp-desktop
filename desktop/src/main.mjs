@@ -6,6 +6,9 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createLocalCore } from "./local-core.mjs";
 import { createMesh } from "./mesh.mjs";
+import { createCertificateVault } from "./certificate-vault.mjs";
+import { createSecretVault } from "./secret-vault.mjs";
+import { createErpServices } from "./erp-services.mjs";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
@@ -13,6 +16,9 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024;
 let mainWindow = null;
 let localCore = null;
 let mesh = null;
+let certificateVault = null;
+let secretVault = null;
+let erpServices = null;
 
 function userDataPath(file) { return path.join(app.getPath("userData"), file); }
 
@@ -102,6 +108,7 @@ async function getStatus() {
   const workspace = await getWorkspace();
   const meshStatus = mesh?.status() || { mode: "mesh", reachablePeers: 0, discovered: [], localAddresses: [], listenPort: null, lastSyncAt: null };
   const peers = localCore?.getPeers?.() || [];
+  const certificates = certificateVault ? await certificateVault.list() : [];
   return {
     online: true,
     paired: Boolean(workspace?.id),
@@ -117,6 +124,7 @@ async function getStatus() {
     lastSyncAt: meshStatus.lastSyncAt || null,
     localAddresses: meshStatus.localAddresses || [],
     listenPort: meshStatus.listenPort || null,
+    localCertificates: certificates.length,
   };
 }
 
@@ -164,20 +172,27 @@ async function requestLocal(apiPath, options = {}) {
   if (options.body && Buffer.byteLength(String(options.body), "utf8") > MAX_BODY_BYTES) return apiResponse(413, { error: "Operação excede o limite local de 8 MB." });
   const workspace = await getWorkspace();
   if (!workspace) return apiResponse(401, { error: "Este computador ainda não criou nem entrou em um ambiente Seven Mesh." });
+
+  const url = new URL(apiPath, "http://seven.local");
+  const method = String(options.method || "GET").toUpperCase();
+  let payload = {};
+  try { payload = options.body ? JSON.parse(options.body) : {}; } catch { payload = {}; }
+  if (url.pathname === "/api/company") {
+    const result = await erpServices.companyApi(method, payload);
+    if (result.ok && method !== "GET") void mesh?.syncAll();
+    return result;
+  }
+
   const meshResult = await meshApiRequest(apiPath, options);
   if (meshResult) return meshResult;
   const result = await localCore.apiRequest(apiPath, options);
-  if (result.ok && String(options.method || "GET").toUpperCase() !== "GET") void mesh?.syncAll();
+  if (result.ok && method !== "GET") void mesh?.syncAll();
   return result;
 }
 
 async function pairDevice(payload = {}) {
   await setDeviceName(payload.deviceName);
-  const result = await mesh.pairWithCode({
-    code: payload.code,
-    deviceName: await getDeviceName(),
-    address: payload.address || "",
-  });
+  const result = await mesh.pairWithCode({ code: payload.code, deviceName: await getDeviceName(), address: payload.address || "" });
   await broadcastStatus();
   return result;
 }
@@ -201,27 +216,12 @@ async function forgetDevice() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1040,
-    minHeight: 680,
-    show: false,
-    backgroundColor: "#f5f7fb",
-    title: "Seven ERP",
-    icon: path.join(APP_DIR, "../build/icon.png"),
-    webPreferences: {
-      preload: path.join(APP_DIR, "preload.mjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
-    },
+    width: 1440, height: 900, minWidth: 1040, minHeight: 680, show: false,
+    backgroundColor: "#f5f7fb", title: "Seven ERP", icon: path.join(APP_DIR, "../build/icon.png"),
+    webPreferences: { preload: path.join(APP_DIR, "preload.mjs"), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true },
   });
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) void shell.openExternal(url);
-    return { action: "deny" };
-  });
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => { if (url.startsWith("https://")) void shell.openExternal(url); return { action: "deny" }; });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   void mainWindow.loadFile(path.join(APP_DIR, "../dist/index.html"));
 }
@@ -229,30 +229,18 @@ function createWindow() {
 const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
 else {
-  app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
-  });
+  app.on("second-instance", () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
 
   app.whenReady().then(async () => {
     const config = await loadConfig();
-    localCore = createLocalCore({
-      dataDir: app.getPath("userData"), deviceId: config.deviceId, deviceName: config.deviceName,
-      getWorkspace,
-    });
+    localCore = createLocalCore({ dataDir: app.getPath("userData"), deviceId: config.deviceId, deviceName: config.deviceName, getWorkspace });
     await localCore.initialize();
 
-    mesh = createMesh({
-      core: localCore,
-      deviceId: config.deviceId,
-      getDeviceName,
-      appVersion: app.getVersion(),
-      getWorkspace,
-      setWorkspace,
-      onStatus: broadcastStatus,
-    });
+    certificateVault = createCertificateVault({ dataDir: app.getPath("userData"), readJson, writeJson });
+    secretVault = createSecretVault({ dataDir: app.getPath("userData") });
+    erpServices = createErpServices({ core: localCore, certificateVault, secretVault });
+
+    mesh = createMesh({ core: localCore, deviceId: config.deviceId, getDeviceName, appVersion: app.getVersion(), getWorkspace, setWorkspace, onStatus: broadcastStatus });
     await mesh.start();
 
     ipcMain.handle("seven:get-status", getStatus);
@@ -262,6 +250,13 @@ else {
     ipcMain.handle("seven:api-request", (_event, apiPath, options) => requestLocal(apiPath, options));
     ipcMain.handle("seven:mesh-add-peer", (_event, address) => addRemotePeer(address));
     ipcMain.handle("seven:mesh-sync", async () => { await mesh.syncAll(); return getStatus(); });
+    ipcMain.handle("seven:certificates-list", () => certificateVault.list());
+    ipcMain.handle("seven:certificate-import", (_event, payload) => certificateVault.importPfx(payload));
+    ipcMain.handle("seven:certificate-remove", (_event, id) => certificateVault.remove(id));
+    ipcMain.handle("seven:integration-secrets-set", (_event, connector, secrets) => secretVault.set(connector, secrets));
+    ipcMain.handle("seven:integration-secrets-status", (_event, connector) => secretVault.status(connector));
+    ipcMain.handle("seven:integration-secrets-remove", (_event, connector) => secretVault.remove(connector));
+    ipcMain.handle("seven:integration-test", (_event, payload) => erpServices.testIntegration(payload));
 
     createWindow();
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
