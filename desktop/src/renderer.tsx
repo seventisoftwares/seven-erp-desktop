@@ -1,6 +1,6 @@
 import React, { useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import SevenErpApp from "../../app/seven-erp-app";
+import SevenErpShell from "../../app/seven-erp-shell";
 import erpCss from "../../app/globals.css?raw";
 import "./desktop.css";
 
@@ -71,7 +71,7 @@ function DesktopApp() {
   if (startupError) return <div className="desktop-loading"><span>!</span><strong>Seven ERP</strong><small>{startupError}</small></div>;
   if (!status) return <div className="desktop-loading"><span>S</span><strong>Seven ERP</strong><small>Preparando ambiente seguro...</small></div>;
   if (!status.paired) return <PairingScreen status={status} onPaired={() => window.sevenDesktop!.getStatus().then(setStatus)} />;
-  return <SevenErpApp />;
+  return <SevenErpShell />;
 }
 
 createRoot(document.getElementById("root")!).render(<React.StrictMode><DesktopApp /></React.StrictMode>);
