@@ -7,6 +7,7 @@ import IntegrationsModuleV3 from "./integrations-module-v3";
 import MeshDevicesModule from "./mesh-devices-module";
 import CompanyModule from "./company-module";
 import "./erp-enhancements.css";
+import "./erp-professional.css";
 
 type EnhancedModule = "service" | "integrations" | "devices" | "company" | null;
 
