@@ -6,17 +6,7 @@ const safeName = (value) => String(value || "").replace(/[^a-zA-Z0-9_-]/g, "").s
 
 export function createSecretVault({ dataDir }) {
   const dir = path.join(dataDir, "integration-secrets");
-  async function set(connector, secrets) {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error("O armazenamento seguro do sistema operacional não está disponível.");
-    const name = safeName(connector);
-    if (!name) throw new Error("Integração inválida.");
-    await mkdir(dir, { recursive: true });
-    const clean = {};
-    for (const [key, value] of Object.entries(secrets || {})) if (typeof value === "string" && value.trim()) clean[key] = value;
-    const encrypted = safeStorage.encryptString(JSON.stringify(clean));
-    await writeFile(path.join(dir, `${name}.bin`), encrypted, { mode: 0o600 });
-    return { stored: Object.keys(clean), connector: name };
-  }
+
   async function get(connector) {
     if (!safeStorage.isEncryptionAvailable()) throw new Error("Cofre seguro indisponível.");
     const name = safeName(connector);
@@ -25,14 +15,38 @@ export function createSecretVault({ dataDir }) {
       return JSON.parse(safeStorage.decryptString(encrypted));
     } catch { return {}; }
   }
+
+  async function set(connector, secrets) {
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("O armazenamento seguro do sistema operacional não está disponível.");
+    const name = safeName(connector);
+    if (!name) throw new Error("Integração inválida.");
+    await mkdir(dir, { recursive: true });
+    const existing = await get(connector);
+    const merged = { ...existing };
+    for (const [key, value] of Object.entries(secrets || {})) {
+      if (value === null) delete merged[key];
+      else if (typeof value === "string" && value.trim()) merged[key] = value;
+    }
+    const encrypted = safeStorage.encryptString(JSON.stringify(merged));
+    await writeFile(path.join(dir, `${name}.bin`), encrypted, { mode: 0o600 });
+    return { stored: Object.keys(merged), connector: name, certificateId: merged.certificateId || null };
+  }
+
   async function status(connector) {
     const secrets = await get(connector);
-    return { connector: safeName(connector), stored: Object.keys(secrets), configured: Object.keys(secrets).length > 0 };
+    return {
+      connector: safeName(connector),
+      stored: Object.keys(secrets),
+      configured: Object.keys(secrets).length > 0,
+      certificateId: typeof secrets.certificateId === "string" ? secrets.certificateId : null,
+    };
   }
+
   async function remove(connector) {
     const name = safeName(connector);
     try { await unlink(path.join(dir, `${name}.bin`)); } catch {}
     return { removed: true };
   }
+
   return { set, get, status, remove };
 }
