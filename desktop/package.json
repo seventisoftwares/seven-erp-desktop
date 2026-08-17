@@ -1,8 +1,8 @@
 {
   "name": "seven-erp-desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "Seven ERP Desktop com operação offline e sincronização Seven Cloud",
+  "description": "Seven ERP Desktop local-first com sincronização direta Seven Mesh",
   "author": "Seven TI Tecnologia & Serviços LTDA",
   "license": "UNLICENSED",
   "type": "module",
@@ -40,8 +40,7 @@
     },
     "files": [
       "dist/**/*",
-      "src/main.mjs",
-      "src/preload.mjs",
+      "src/**/*.mjs",
       "package.json"
     ],
     "extraMetadata": {
