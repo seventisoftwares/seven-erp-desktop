@@ -1,4 +1,4 @@
-import SevenErpApp from "./seven-erp-app";
+import SevenErpShell from "./seven-erp-shell";
 import { headers } from "next/headers";
 import { requireChatGPTUser } from "./chatgpt-auth";
 
@@ -10,5 +10,5 @@ export default async function Home() {
   if (host && !host.startsWith("terminal.local") && !host.startsWith("localhost")) {
     await requireChatGPTUser("/");
   }
-  return <SevenErpApp />;
+  return <SevenErpShell />;
 }
