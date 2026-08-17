@@ -15,6 +15,17 @@ const CONNECTORS = new Set([
 ]);
 const ENVIRONMENTS = new Set(["homologation", "production", "global"]);
 
+const REQUIREMENTS: Record<string, { credential?: boolean; primary?: boolean; secondary?: boolean }> = {
+  nfse_national: { credential: true, primary: true, secondary: true },
+  nfe_sefaz: { credential: true, primary: true, secondary: true },
+  nfe_distribution: { credential: true, primary: true },
+  cte_received: { credential: true, primary: true },
+  mdfe_received: { credential: true, primary: true },
+  banrisul: { credential: true, primary: true, secondary: true },
+  btg: { credential: true, primary: true, secondary: true },
+  certificate_partner: { credential: true, primary: true },
+};
+
 type SavePayload = {
   action?: "save" | "validate";
   connector?: string;
@@ -43,6 +54,18 @@ function parseConfiguration(value: string | null) {
   catch { return {}; }
 }
 
+function validateLocalConfiguration(connector: string, credentialReference: string | null, configuration: Record<string, unknown>) {
+  if (connector === "system_policies") return [];
+  const required = REQUIREMENTS[connector] || {};
+  const missing: string[] = [];
+  if (required.credential && !credentialReference?.trim()) missing.push("referência da credencial/certificado");
+  if (required.primary && !cleanText(configuration.primaryReference, 1000)) missing.push("identificação principal");
+  if (required.secondary && !cleanText(configuration.secondaryReference, 1000)) missing.push("identificação secundária");
+  const webhookUrl = cleanText(configuration.webhookUrl, 1000);
+  if (webhookUrl && !/^https:\/\//i.test(webhookUrl)) missing.push("webhook HTTPS válido");
+  return missing;
+}
+
 export async function GET(request: Request) {
   try {
     const identity = await resolveRequestIdentity(request);
@@ -61,6 +84,20 @@ export async function GET(request: Request) {
     const lastCheck = operational.map((row) => row.lastHealthCheckAt).filter(Boolean).sort().at(-1) || null;
     return Response.json({
       connections,
+      coreModulesIndependent: true,
+      integrationPolicy: {
+        serviceOrders: "optional",
+        customers: "optional",
+        catalog: "optional",
+        inventory: "optional",
+        purchases: "optional",
+        sales: "optional",
+        financeManual: "optional",
+        nfeDrafts: "optional",
+        nfeTransmission: "required",
+        bankRegistration: "required",
+        externalDocumentDistribution: "required",
+      },
       summary: {
         active: operational.filter((row) => row.status === "active").length,
         configured: operational.filter((row) => row.status !== "not_configured").length,
@@ -82,8 +119,9 @@ export async function POST(request: Request) {
     if (!ENVIRONMENTS.has(environment)) throw new ApiError("Ambiente inválido.", 400);
     if (connector === "system_policies" && environment !== "global") throw new ApiError("As políticas devem usar o escopo global.", 400);
 
+    // Usuários web autenticados e computadores previamente pareados podem administrar
+    // configurações. O dispositivo já possui token individual e toda mudança fica auditada.
     const identity = await resolveRequestIdentity(request);
-    if (identity.source === "desktop") throw new ApiError("Altere integrações pelo painel administrativo web.", 403);
     const db = await ensureDefaultOrganization();
     const [existing] = await db.select().from(integrationConnections).where(and(
       eq(integrationConnections.organizationId, identity.organizationId),
@@ -94,26 +132,35 @@ export async function POST(request: Request) {
     if (payload.action === "validate") {
       if (!existing) throw new ApiError("Salve a configuração antes de verificá-la.", 409);
       const checkedAt = new Date().toISOString();
-      const credentialReady = Boolean(existing.credentialReference?.trim());
-      const nextStatus = connector === "system_policies" ? "configuration_saved" : credentialReady ? "ready_for_activation" : "validation_failed";
-      const lastError = connector !== "system_policies" && !credentialReady ? "Informe a referência da credencial armazenada no cofre seguro." : null;
+      const configuration = parseConfiguration(existing.configurationJson);
+      const missing = validateLocalConfiguration(connector, existing.credentialReference, configuration);
+      const nextStatus = connector === "system_policies" ? "configuration_saved" : missing.length ? "validation_failed" : "ready_for_activation";
+      const lastError = missing.length ? `Complete os seguintes campos: ${missing.join(", ")}.` : null;
       await db.batch([
         db.update(integrationConnections).set({ status: nextStatus, lastHealthCheckAt: checkedAt, lastError, updatedAt: checkedAt }).where(eq(integrationConnections.id, existing.id)),
         db.insert(auditLogs).values({
           id: crypto.randomUUID(), organizationId: identity.organizationId, actorEmail: identity.actorEmail,
           action: "integration.configuration_validated", entityType: "integration_connection", entityId: existing.id,
-          beforeJson: JSON.stringify({ status: existing.status }), afterJson: JSON.stringify({ status: nextStatus, lastError }),
+          beforeJson: JSON.stringify({ status: existing.status }), afterJson: JSON.stringify({ status: nextStatus, lastError, source: identity.source }),
           correlationId: request.headers.get("cf-ray"),
         }),
       ]);
-      return Response.json({ status: nextStatus, lastError, checkedAt, externalRequestPerformed: false });
+      return Response.json({
+        status: nextStatus,
+        lastError,
+        checkedAt,
+        externalRequestPerformed: false,
+        externalValidationPending: !missing.length && connector !== "system_policies",
+        coreModulesIndependent: true,
+      });
     }
 
     const configuration = cleanConfiguration(payload.configuration);
     const credentialReference = cleanText(payload.credentialReference, 200) || null;
     const savedAt = new Date().toISOString();
     const id = existing?.id || crypto.randomUUID();
-    const status = connector === "system_policies" || credentialReference ? "configuration_saved" : "configuration_pending";
+    const hasUsefulConfiguration = Boolean(credentialReference || Object.values(configuration).some((value) => String(value).trim()));
+    const status = connector === "system_policies" ? "configuration_saved" : hasUsefulConfiguration ? "configuration_saved" : "configuration_pending";
     const values = {
       id,
       organizationId: identity.organizationId,
@@ -134,14 +181,14 @@ export async function POST(request: Request) {
         id: crypto.randomUUID(), organizationId: identity.organizationId, actorEmail: identity.actorEmail,
         action: "integration.configuration_saved", entityType: "integration_connection", entityId: id,
         beforeJson: existing ? JSON.stringify({ connector: existing.connector, environment: existing.environment, status: existing.status }) : null,
-        afterJson: JSON.stringify(publicSnapshot), correlationId: request.headers.get("cf-ray"),
+        afterJson: JSON.stringify({ ...publicSnapshot, source: identity.source }), correlationId: request.headers.get("cf-ray"),
       }),
       db.insert(syncChangeLog).values({
         organizationId: identity.organizationId, deviceId: identity.deviceId,
         entityType: "integration_connection", entityId: id, action: "upsert", payloadJson: JSON.stringify(publicSnapshot),
       }),
     ]);
-    return Response.json({ connection: { ...values, configuration, configurationJson: undefined } }, { status: existing ? 200 : 201 });
+    return Response.json({ connection: { ...values, configuration, configurationJson: undefined }, coreModulesIndependent: true }, { status: existing ? 200 : 201 });
   } catch (error) {
     return apiErrorResponse(error, "Não foi possível salvar a integração.");
   }
@@ -154,27 +201,26 @@ export async function DELETE(request: Request) {
     const environment = cleanText(payload.environment, 30) || "homologation";
     if (!CONNECTORS.has(connector) || !ENVIRONMENTS.has(environment)) throw new ApiError("Configuração inválida.", 400);
     const identity = await resolveRequestIdentity(request);
-    if (identity.source === "desktop") throw new ApiError("Altere integrações pelo painel administrativo web.", 403);
     const db = await ensureDefaultOrganization();
     const [existing] = await db.select().from(integrationConnections).where(and(
       eq(integrationConnections.organizationId, identity.organizationId),
       eq(integrationConnections.connector, connector),
       eq(integrationConnections.environment, environment),
     )).limit(1);
-    if (!existing) return Response.json({ removed: false });
+    if (!existing) return Response.json({ removed: false, coreModulesIndependent: true });
     await db.batch([
       db.delete(integrationConnections).where(eq(integrationConnections.id, existing.id)),
       db.insert(auditLogs).values({
         id: crypto.randomUUID(), organizationId: identity.organizationId, actorEmail: identity.actorEmail,
         action: "integration.configuration_removed", entityType: "integration_connection", entityId: existing.id,
-        beforeJson: JSON.stringify({ connector, environment, status: existing.status }), correlationId: request.headers.get("cf-ray"),
+        beforeJson: JSON.stringify({ connector, environment, status: existing.status, source: identity.source }), correlationId: request.headers.get("cf-ray"),
       }),
       db.insert(syncChangeLog).values({
         organizationId: identity.organizationId, deviceId: identity.deviceId,
         entityType: "integration_connection", entityId: existing.id, action: "delete", payloadJson: JSON.stringify({ connector, environment }),
       }),
     ]);
-    return Response.json({ removed: true });
+    return Response.json({ removed: true, coreModulesIndependent: true });
   } catch (error) {
     return apiErrorResponse(error, "Não foi possível remover a configuração.");
   }
