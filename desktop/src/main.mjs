@@ -1,18 +1,18 @@
-import { app, BrowserWindow, ipcMain, net, safeStorage, shell } from "electron";
-import { randomUUID } from "node:crypto";
+import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { createLocalCore } from "./local-core.mjs";
+import { createMesh } from "./mesh.mjs";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
-const API_BASE = process.env.SEVEN_ERP_API_URL || "https://seven-erp.marcoopiovezanaa.chatgpt.site";
-const SYNC_INTERVAL_MS = 30_000;
-const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 let mainWindow = null;
-let isOnline = false;
-let syncing = false;
+let localCore = null;
+let mesh = null;
 
 function userDataPath(file) { return path.join(app.getPath("userData"), file); }
 
@@ -31,179 +31,172 @@ async function writeJson(file, value) {
 
 async function loadConfig() {
   const config = await readJson("device.json", {});
-  if (!config.installationId) {
-    config.installationId = randomUUID();
-    await writeJson("device.json", config);
-  }
+  let changed = false;
+  if (!config.installationId) { config.installationId = randomUUID(); changed = true; }
+  if (!config.deviceId) { config.deviceId = randomUUID(); changed = true; }
+  if (!config.deviceName) { config.deviceName = os.hostname(); changed = true; }
+  if (changed) await writeJson("device.json", config);
   return config;
 }
 
-async function saveToken(token) {
-  if (!safeStorage.isEncryptionAvailable()) throw new Error("O armazenamento seguro do sistema não está disponível.");
+async function getDeviceName() {
   const config = await loadConfig();
-  config.encryptedToken = safeStorage.encryptString(token).toString("base64");
+  return config.deviceName || os.hostname();
+}
+
+async function setDeviceName(value) {
+  const config = await loadConfig();
+  config.deviceName = String(value || "").trim().slice(0, 80) || os.hostname();
   await writeJson("device.json", config);
+  return config.deviceName;
 }
 
-async function loadToken() {
+async function getWorkspace() {
   const config = await loadConfig();
-  if (!config.encryptedToken || !safeStorage.isEncryptionAvailable()) return null;
-  try { return safeStorage.decryptString(Buffer.from(config.encryptedToken, "base64")); }
-  catch { return null; }
+  if (!config.workspaceId || !config.encryptedWorkspaceKey) return null;
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  try {
+    return {
+      id: config.workspaceId,
+      name: config.workspaceName || "Empresa Seven ERP",
+      key: safeStorage.decryptString(Buffer.from(config.encryptedWorkspaceKey, "base64")),
+    };
+  } catch { return null; }
 }
 
-function allowedApiPath(value) {
-  return typeof value === "string" && value.startsWith("/api/") && !value.includes("..") && !value.includes("//");
+async function setWorkspace(workspace) {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error("O armazenamento seguro do Windows/macOS não está disponível para proteger a chave do Seven Mesh.");
+  const id = String(workspace?.id || "").trim();
+  const key = String(workspace?.key || "").trim();
+  if (!id || !key) throw new Error("Ambiente Seven Mesh inválido.");
+  const config = await loadConfig();
+  config.workspaceId = id;
+  config.workspaceName = String(workspace?.name || "Empresa Seven ERP").trim().slice(0, 120);
+  config.encryptedWorkspaceKey = safeStorage.encryptString(key).toString("base64");
+  config.meshActivatedAt = new Date().toISOString();
+  await writeJson("device.json", config);
+  await broadcastStatus();
+  return { id: config.workspaceId, name: config.workspaceName };
 }
 
-async function remoteRequest(apiPath, options = {}, tokenOverride) {
-  if (!allowedApiPath(apiPath)) throw new Error("Rota de API não permitida.");
-  const token = tokenOverride === undefined ? await loadToken() : tokenOverride;
-  const headers = new Headers();
-  headers.set("accept", "application/json");
-  if (options.headers?.["content-type"]) headers.set("content-type", options.headers["content-type"]);
-  if (token) headers.set("authorization", `Bearer ${token}`);
-  if (options.operationId) headers.set("x-seven-operation-id", options.operationId);
-  const body = options.body || undefined;
-  if (body && Buffer.byteLength(body, "utf8") > MAX_BODY_BYTES) throw new Error("Operação excede o limite local de 2 MB.");
-  const response = await net.fetch(`${API_BASE}${apiPath}`, { method: options.method || "GET", headers, body });
-  const responseBody = await response.text();
-  return { status: response.status, ok: response.ok, headers: { "content-type": response.headers.get("content-type") || "application/json" }, body: responseBody };
+async function createWorkspace(payload = {}) {
+  const existing = await getWorkspace();
+  if (existing) return { created: false, workspace: { id: existing.id, name: existing.name } };
+  await setDeviceName(payload.deviceName);
+  const workspace = {
+    id: randomUUID(),
+    name: String(payload.name || "Minha empresa").trim().slice(0, 120) || "Minha empresa",
+    key: randomBytes(32).toString("base64url"),
+  };
+  await setWorkspace(workspace);
+  await mesh?.syncAll();
+  return { created: true, workspace: { id: workspace.id, name: workspace.name } };
+}
+
+function apiResponse(status, payload) {
+  return { status, ok: status >= 200 && status < 300, headers: { "content-type": "application/json", "x-seven-local": "true" }, body: JSON.stringify(payload) };
 }
 
 async function getStatus() {
   const config = await loadConfig();
-  const queue = await readJson("offline-queue.json", []);
-  return { online: isOnline, paired: Boolean(await loadToken()), pending: queue.length, deviceName: config.deviceName || os.hostname(), apiBase: API_BASE };
+  const workspace = await getWorkspace();
+  const meshStatus = mesh?.status() || { mode: "mesh", reachablePeers: 0, discovered: [], localAddresses: [], listenPort: null, lastSyncAt: null };
+  const peers = localCore?.getPeers?.() || [];
+  return {
+    online: true,
+    paired: Boolean(workspace?.id),
+    pending: 0,
+    deviceName: config.deviceName || os.hostname(),
+    apiBase: "local://seven-erp",
+    storageMode: "local-first",
+    syncMode: "desktop-mesh",
+    workspaceId: workspace?.id || null,
+    workspaceName: workspace?.name || null,
+    peers: peers.length,
+    reachablePeers: meshStatus.reachablePeers || 0,
+    lastSyncAt: meshStatus.lastSyncAt || null,
+    localAddresses: meshStatus.localAddresses || [],
+    listenPort: meshStatus.listenPort || null,
+  };
 }
 
 async function broadcastStatus() {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("seven:status", await getStatus());
 }
 
-async function queueOperation(apiPath, options) {
-  const queue = await readJson("offline-queue.json", []);
-  const operationId = options.operationId || randomUUID();
-  if (!queue.some((item) => item.operationId === operationId)) {
-    queue.push({ id: randomUUID(), operationId, path: apiPath, method: options.method || "POST", headers: options.headers || {}, body: options.body || null, queuedAt: new Date().toISOString(), attempts: 0 });
-    await writeJson("offline-queue.json", queue);
-  }
-  await broadcastStatus();
+async function meshApiRequest(apiPath, options = {}) {
+  const url = new URL(apiPath, "http://seven.local");
+  const method = String(options.method || "GET").toUpperCase();
   let payload = {};
   try { payload = options.body ? JSON.parse(options.body) : {}; } catch { payload = {}; }
-  if (apiPath === "/api/customers") return { status: 202, ok: true, headers: { "content-type": "application/json" }, body: JSON.stringify({ queued: true, offline: true, operationId, customer: { id: `offline-${operationId}`, ...payload } }) };
-  if (apiPath === "/api/nfe-drafts") return { status: 202, ok: true, headers: { "content-type": "application/json" }, body: JSON.stringify({ queued: true, offline: true, operationId, draft: { id: `offline-${operationId}`, ...payload }, validationErrors: [], readiness: { transmissionEnabled: false, blockers: ["Aguardando conexão para validação no servidor."] } }) };
-  return { status: 202, ok: true, headers: { "content-type": "application/json" }, body: JSON.stringify({ queued: true, offline: true, operationId }) };
-}
 
-async function cachedRequest(apiPath) {
-  const cache = await readJson("api-cache.json", {});
-  const cached = cache[apiPath];
-  if (!cached) return { status: 503, ok: false, headers: { "content-type": "application/json", "x-seven-offline": "true" }, body: JSON.stringify({ error: "Este conteúdo ainda não foi sincronizado neste computador.", offline: true }) };
-  return { ...cached, headers: { ...cached.headers, "x-seven-offline": "true" } };
-}
-
-async function requestWithOffline(apiPath, options = {}) {
-  const method = (options.method || "GET").toUpperCase();
-  const operationId = method === "GET" ? undefined : options.operationId || randomUUID();
-  const token = await loadToken();
-  if (!token) return { status: 401, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Este computador ainda não foi autorizado." }) };
-  try {
-    const result = await remoteRequest(apiPath, { ...options, method, operationId });
-    isOnline = true;
-    if (method === "GET" && result.ok) {
-      const cache = await readJson("api-cache.json", {});
-      cache[apiPath] = result;
-      await writeJson("api-cache.json", cache);
+  if (url.pathname === "/api/sync/pairing") {
+    if (method === "GET") {
+      const devices = (localCore?.getPeers?.() || []).map((peer) => ({
+        id: peer.id, name: peer.name || "Computador Seven ERP", platform: peer.source === "manual" ? "Rede remota/VPN" : "Rede local",
+        appVersion: peer.appVersion || app.getVersion(), status: peer.status === "offline" ? "revoked" : "active",
+        lastSeenAt: peer.lastSeenAt || null, lastSyncCursor: 0, createdAt: peer.createdAt || peer.updatedAt || null,
+        url: peer.url || null,
+      }));
+      return apiResponse(200, { devices, mesh: mesh?.status() || {}, local: true });
     }
-    await broadcastStatus();
-    return result;
-  } catch {
-    isOnline = false;
-    return method === "GET" ? cachedRequest(apiPath) : queueOperation(apiPath, { ...options, method, operationId });
-  }
-}
-
-async function flushQueue() {
-  if (syncing || !(await loadToken())) return;
-  syncing = true;
-  try {
-    const queue = await readJson("offline-queue.json", []);
-    const remaining = [];
-    const failed = await readJson("failed-operations.json", []);
-    for (let index = 0; index < queue.length; index += 1) {
-      const item = queue[index];
-      try {
-        const result = await remoteRequest(item.path, { ...item, operationId: item.operationId });
-        if (!result.ok) {
-          const next = { ...item, attempts: item.attempts + 1, lastStatus: result.status, lastAttemptAt: new Date().toISOString() };
-          if (result.status >= 400 && result.status < 500 && result.status !== 408 && result.status !== 409 && result.status !== 429) failed.push(next);
-          else remaining.push(next);
-        }
-      } catch {
-        remaining.push({ ...item, attempts: item.attempts + 1 });
-        remaining.push(...queue.slice(index + 1));
-        break;
-      }
+    if (method === "POST") {
+      const workspace = await getWorkspace();
+      if (!workspace) return apiResponse(409, { error: "Crie ou conecte um ambiente Seven Mesh antes de autorizar outro computador." });
+      const result = mesh.createPairingCode();
+      return apiResponse(201, { ...result, local: true });
     }
-    await writeJson("offline-queue.json", remaining);
-    await writeJson("failed-operations.json", failed.slice(-500));
-    const config = await loadConfig();
-    try {
-      const result = await remoteRequest(`/api/sync/bootstrap?cursor=${config.syncCursor || 0}`);
-      if (result.ok) {
-        const data = JSON.parse(result.body);
-        config.syncCursor = data.cursor || config.syncCursor || 0;
-        config.lastSyncAt = new Date().toISOString();
-        await writeJson("device.json", config);
-        const cache = await readJson("api-cache.json", {});
-        cache["/api/sync/bootstrap"] = result;
-        for (const apiPath of ["/api/dashboard", "/api/customers", "/api/integrations", "/api/nfe-drafts", "/api/recipient-manifestations"]) {
-          try {
-            const refreshed = await remoteRequest(apiPath);
-            if (refreshed.ok) cache[apiPath] = refreshed;
-          } catch { /* mantém o último cache válido desta rota */ }
-        }
-        await writeJson("api-cache.json", cache);
-        isOnline = true;
-      }
-    } catch { isOnline = false; }
-  } finally {
-    syncing = false;
-    await broadcastStatus();
+    if (method === "DELETE") {
+      if (payload.deviceId) await mesh.removePeer(String(payload.deviceId));
+      return apiResponse(200, { revoked: true, deviceId: payload.deviceId, local: true });
+    }
   }
+
+  if (url.pathname === "/api/sync/status" && method === "GET") return apiResponse(200, await getStatus());
+  if (url.pathname === "/api/sync/bootstrap" && method === "GET") return apiResponse(200, { cursor: Date.now(), snapshot: localCore.exportSnapshot(), mesh: mesh?.status() || {}, local: true });
+  return null;
 }
 
-async function pairDevice({ code, deviceName }) {
-  const config = await loadConfig();
-  const result = await remoteRequest("/api/sync/pair", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ code, deviceName, installationId: config.installationId, platform: `${process.platform}-${process.arch}`, appVersion: app.getVersion() }),
-  }, null);
-  const data = JSON.parse(result.body || "{}");
-  if (!result.ok || !data.token) throw new Error(data.error || "Não foi possível autorizar este computador.");
-  await saveToken(data.token);
-  config.deviceName = deviceName;
-  config.deviceId = data.device.id;
-  config.organizationId = data.device.organizationId;
-  config.syncCursor = data.sync?.cursor || 0;
-  await writeJson("device.json", { ...(await loadConfig()), ...config });
-  isOnline = true;
-  await flushQueue();
-  return { paired: true, device: data.device };
+async function requestLocal(apiPath, options = {}) {
+  if (typeof apiPath !== "string" || !apiPath.startsWith("/api/") || apiPath.includes("..") || apiPath.includes("//")) {
+    return apiResponse(400, { error: "Rota de API local não permitida." });
+  }
+  if (options.body && Buffer.byteLength(String(options.body), "utf8") > MAX_BODY_BYTES) return apiResponse(413, { error: "Operação excede o limite local de 8 MB." });
+  const workspace = await getWorkspace();
+  if (!workspace) return apiResponse(401, { error: "Este computador ainda não criou nem entrou em um ambiente Seven Mesh." });
+  const meshResult = await meshApiRequest(apiPath, options);
+  if (meshResult) return meshResult;
+  const result = await localCore.apiRequest(apiPath, options);
+  if (result.ok && String(options.method || "GET").toUpperCase() !== "GET") void mesh?.syncAll();
+  return result;
+}
+
+async function pairDevice(payload = {}) {
+  await setDeviceName(payload.deviceName);
+  const result = await mesh.pairWithCode({
+    code: payload.code,
+    deviceName: await getDeviceName(),
+    address: payload.address || "",
+  });
+  await broadcastStatus();
+  return result;
+}
+
+async function addRemotePeer(address) {
+  const peer = await mesh.addRemotePeer(address);
+  await broadcastStatus();
+  return peer;
 }
 
 async function forgetDevice() {
   const config = await loadConfig();
-  delete config.encryptedToken;
-  delete config.deviceId;
-  delete config.organizationId;
-  config.syncCursor = 0;
+  delete config.workspaceId;
+  delete config.workspaceName;
+  delete config.encryptedWorkspaceKey;
+  delete config.meshActivatedAt;
   await writeJson("device.json", config);
-  isOnline = false;
   await broadcastStatus();
-  return { paired: false };
+  return { paired: false, localDataPreserved: true };
 }
 
 function createWindow() {
@@ -236,17 +229,44 @@ function createWindow() {
 const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
 else {
-  app.on("second-instance", () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.focus(); } });
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
   app.whenReady().then(async () => {
+    const config = await loadConfig();
+    localCore = createLocalCore({
+      dataDir: app.getPath("userData"), deviceId: config.deviceId, deviceName: config.deviceName,
+      getWorkspace,
+    });
+    await localCore.initialize();
+
+    mesh = createMesh({
+      core: localCore,
+      deviceId: config.deviceId,
+      getDeviceName,
+      appVersion: app.getVersion(),
+      getWorkspace,
+      setWorkspace,
+      onStatus: broadcastStatus,
+    });
+    await mesh.start();
+
     ipcMain.handle("seven:get-status", getStatus);
+    ipcMain.handle("seven:create-workspace", (_event, payload) => createWorkspace(payload));
     ipcMain.handle("seven:pair", (_event, payload) => pairDevice(payload));
     ipcMain.handle("seven:forget", forgetDevice);
-    ipcMain.handle("seven:api-request", (_event, apiPath, options) => requestWithOffline(apiPath, options));
+    ipcMain.handle("seven:api-request", (_event, apiPath, options) => requestLocal(apiPath, options));
+    ipcMain.handle("seven:mesh-add-peer", (_event, address) => addRemotePeer(address));
+    ipcMain.handle("seven:mesh-sync", async () => { await mesh.syncAll(); return getStatus(); });
+
     createWindow();
-    await flushQueue();
-    setInterval(() => void flushQueue(), SYNC_INTERVAL_MS).unref();
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
 }
 
+app.on("before-quit", () => { void mesh?.stop(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
