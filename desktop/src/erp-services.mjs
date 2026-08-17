@@ -3,6 +3,19 @@ import { net } from "electron";
 const digits = (value) => String(value || "").replace(/\D/g, "");
 const text = (value) => String(value || "").trim();
 
+function validCnpj(value) {
+  const cnpj = digits(value);
+  if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) return false;
+  const calc = (base, weights) => {
+    const sum = base.split("").reduce((total, digit, index) => total + Number(digit) * weights[index], 0);
+    const remainder = sum % 11;
+    return remainder < 2 ? 0 : 11 - remainder;
+  };
+  const d1 = calc(cnpj.slice(0, 12), [5,4,3,2,9,8,7,6,5,4,3,2]);
+  const d2 = calc(cnpj.slice(0, 12) + d1, [6,5,4,3,2,9,8,7,6,5,4,3,2]);
+  return cnpj === cnpj.slice(0, 12) + String(d1) + String(d2);
+}
+
 export function createErpServices({ core, certificateVault, secretVault }) {
   async function getCompany() {
     const raw = await core.apiRequest("/api/integrations", { method: "GET" });
@@ -24,7 +37,8 @@ export function createErpServices({ core, certificateVault, secretVault }) {
       invoiceEmail: text(payload.invoiceEmail).toLowerCase(), notes: text(payload.notes), updatedAt: new Date().toISOString(),
     };
     if (!company.legalName) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Razão social é obrigatória." }) };
-    if (company.taxId.length !== 14) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "CNPJ deve ter 14 dígitos." }) };
+    if (!validCnpj(company.taxId)) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Informe um CNPJ válido." }) };
+    if (!/^[A-Z]{2}$/.test(company.state)) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "UF deve conter 2 letras." }) };
     if (company.cityCode && company.cityCode.length !== 7) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Código IBGE deve ter 7 dígitos." }) };
     const result = await core.apiRequest("/api/integrations", {
       method: "POST", headers: { "content-type": "application/json" },
@@ -37,12 +51,12 @@ export function createErpServices({ core, certificateVault, secretVault }) {
   function fiscalRequirements(connector, config, company) {
     const blockers = [];
     const cnpj = digits(config.cnpj || company?.taxId);
-    if (cnpj.length !== 14) blockers.push("Cadastre o CNPJ da empresa com 14 dígitos.");
+    if (!validCnpj(cnpj)) blockers.push("Cadastre um CNPJ válido para o estabelecimento.");
     if (!config.certificateId) blockers.push("Importe e selecione um certificado digital A1 (.PFX/.P12).");
     if (connector === "nfe_sefaz") {
       if (!text(config.stateRegistration || company?.stateRegistration)) blockers.push("Informe a Inscrição Estadual.");
-      if (!text(config.uf || company?.state)) blockers.push("Informe a UF do estabelecimento.");
-      if (config.enableNfce && (!text(config.cscId) || !text(config.cscToken))) blockers.push("Para NFC-e, informe ID do CSC e CSC/Token fornecido pela SEFAZ.");
+      if (!/^[A-Z]{2}$/.test(text(config.uf || company?.state).toUpperCase())) blockers.push("Informe a UF do estabelecimento.");
+      if (config.enableNfce && !text(config.cscId)) blockers.push("Para NFC-e, informe o ID do CSC fornecido pela SEFAZ.");
     }
     if (connector === "nfse_national") {
       if (!text(config.municipalRegistration || company?.municipalRegistration)) blockers.push("Informe a Inscrição Municipal.");
@@ -54,6 +68,10 @@ export function createErpServices({ core, certificateVault, secretVault }) {
   async function testFiscal(connector, config) {
     const company = await getCompany();
     const blockers = fiscalRequirements(connector, config, company);
+    if (connector === "nfe_sefaz" && config.enableNfce) {
+      const fiscalSecrets = await secretVault.get("nfe_sefaz");
+      if (!text(fiscalSecrets.cscToken)) blockers.push("Para NFC-e, informe o CSC/Token e salve-o no cofre seguro deste computador.");
+    }
     if (config.certificateId) {
       const certificate = await certificateVault.validate(config.certificateId);
       if (!certificate.valid) blockers.push(`Certificado A1 inválido neste computador: ${certificate.error || "falha ao abrir PKCS#12"}`);
@@ -62,7 +80,7 @@ export function createErpServices({ core, certificateVault, secretVault }) {
       ok: blockers.length === 0,
       status: blockers.length ? "validation_failed" : "certificate_validated",
       blockers,
-      message: blockers.length ? "Há pendências na configuração fiscal." : "Certificado A1 aberto com sucesso e cadastro fiscal mínimo conferido. A transmissão oficial deve ser homologada no autorizador competente.",
+      message: blockers.length ? "Há pendências na configuração fiscal." : "Certificado A1 aberto com sucesso e cadastro fiscal mínimo conferido. A transmissão oficial ainda depende do credenciamento e da homologação no autorizador competente.",
       externalRequestPerformed: false,
       checkedAt: new Date().toISOString(),
     };
@@ -74,16 +92,27 @@ export function createErpServices({ core, certificateVault, secretVault }) {
     if (!text(secrets.clientId)) blockers.push("Informe o Client ID do aplicativo Banrisul.");
     if (!text(secrets.clientSecret)) blockers.push("Informe o Client Secret do aplicativo Banrisul.");
     if (!text(config.beneficiaryCode)) blockers.push("Informe o código de beneficiário/convênio de cobrança.");
-    if (blockers.length) return { ok: false, status: "validation_failed", blockers, message: "Credenciais bancárias incompletas.", externalRequestPerformed: false };
     const tokenUrl = text(config.oauthUrl);
-    if (!tokenUrl) return { ok: false, status: "validation_failed", blockers: ["Informe o endpoint OAuth2 fornecido pelo Banrisul para esta API/ambiente."], message: "Endpoint OAuth2 ausente.", externalRequestPerformed: false };
-    const body = new URLSearchParams({ grant_type: "client_credentials", client_id: secrets.clientId, client_secret: secrets.clientSecret });
+    if (!tokenUrl) blockers.push("Informe o endpoint OAuth2 indicado na documentação/ambiente da API Cobrança.");
+    if (blockers.length) return { ok: false, status: "validation_failed", blockers, message: "Credenciais bancárias incompletas.", externalRequestPerformed: false };
+
+    const authMethod = config.oauthAuthMethod === "body" ? "body" : "basic";
+    const body = new URLSearchParams({ grant_type: "client_credentials" });
+    const headers = { "content-type": "application/x-www-form-urlencoded", accept: "application/json" };
+    if (authMethod === "body") {
+      body.set("client_id", secrets.clientId);
+      body.set("client_secret", secrets.clientSecret);
+    } else {
+      headers.authorization = `Basic ${Buffer.from(`${secrets.clientId}:${secrets.clientSecret}`).toString("base64")}`;
+    }
+    if (text(config.scopes)) body.set("scope", text(config.scopes));
+
     try {
-      const response = await net.fetch(tokenUrl, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: body.toString() });
+      const response = await net.fetch(tokenUrl, { method: "POST", headers, body: body.toString() });
       const responseText = await response.text();
       let data = {}; try { data = JSON.parse(responseText); } catch {}
       if (!response.ok || !data.access_token) return { ok: false, status: "external_auth_failed", blockers: [`OAuth2 retornou HTTP ${response.status}.`], message: data.error_description || data.error || "O Banrisul não retornou um access_token.", externalRequestPerformed: true, checkedAt: new Date().toISOString() };
-      return { ok: true, status: "active", blockers: [], message: "Autenticação OAuth2 Banrisul concluída com access_token válido.", externalRequestPerformed: true, checkedAt: new Date().toISOString(), expiresIn: data.expires_in || null };
+      return { ok: true, status: "active", blockers: [], message: "Autenticação OAuth2 Banrisul concluída e um Bearer Token foi obtido com sucesso.", externalRequestPerformed: true, checkedAt: new Date().toISOString(), expiresIn: data.expires_in || null };
     } catch (error) {
       return { ok: false, status: "external_unreachable", blockers: ["Não foi possível alcançar o endpoint OAuth2."], message: error instanceof Error ? error.message : "Falha de conexão.", externalRequestPerformed: true, checkedAt: new Date().toISOString() };
     }
@@ -96,11 +125,12 @@ export function createErpServices({ core, certificateVault, secretVault }) {
     if (!text(secrets.clientSecret)) blockers.push("Informe o Client Secret do aplicativo BTG confidencial.");
     if (!text(config.redirectUri)) blockers.push("Informe a Redirect URI cadastrada no Developer Console.");
     if (!text(config.accountId)) blockers.push("Informe o Account ID/identificador da conta beneficiária.");
+    if (!text(config.scopes).includes("openid")) blockers.push("Inclua o escopo openid no fluxo de Authorization Code para Banking.");
     return {
       ok: blockers.length === 0,
       status: blockers.length ? "validation_failed" : "authorization_required",
       blockers,
-      message: blockers.length ? "Configuração BTG incompleta." : "Aplicativo configurado. Para APIs bancárias, o próximo passo é concluir o fluxo OAuth Authorization Code e consentimento da conta; o ERP não marcará a integração como ativa antes disso.",
+      message: blockers.length ? "Configuração BTG incompleta." : "Aplicativo configurado. Para APIs de Banking (boleto, Pix e movimentações), conclua o fluxo OAuth Authorization Code e o consentimento do usuário da conta PJ; Client Credentials isoladamente não libera essas APIs.",
       externalRequestPerformed: false,
       checkedAt: new Date().toISOString(),
     };
@@ -116,7 +146,7 @@ export function createErpServices({ core, certificateVault, secretVault }) {
       const blockers = [];
       if (!text(config.partnerCode)) blockers.push("Informe o código do parceiro/AR.");
       if (!text(config.apiBaseUrl)) blockers.push("Informe a URL da API fornecida pelo parceiro.");
-      return { ok: blockers.length === 0, status: blockers.length ? "validation_failed" : "provider_configured", blockers, message: blockers.length ? "Dados do parceiro incompletos." : "Configuração do parceiro salva. A ativação depende da documentação e das credenciais da API contratada.", externalRequestPerformed: false, checkedAt: new Date().toISOString() };
+      return { ok: blockers.length === 0, status: blockers.length ? "validation_failed" : "provider_configured", blockers, message: blockers.length ? "Dados do parceiro incompletos." : "Configuração do parceiro salva. A ativação depende da documentação e das credenciais fornecidas pela API contratada.", externalRequestPerformed: false, checkedAt: new Date().toISOString() };
     }
     return { ok: false, status: "validation_failed", blockers: ["Integração desconhecida."], message: "Conector inválido.", externalRequestPerformed: false };
   }
