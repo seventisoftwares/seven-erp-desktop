@@ -34,7 +34,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path autoerp-src | Out-Null
           Expand-Archive -Path $zip -DestinationPath autoerp-src -Force
           if (-not (Test-Path 'autoerp-src/package.json')) { throw 'package.json nao encontrado apos extracao.' }
-          Write-Host "Bundle validado: $hash"
+          # Evita que o Vite herde o PostCSS/Tailwind do repositorio pai.
+          "export default { plugins: {} };" | Set-Content -Encoding utf8 'autoerp-src/postcss.config.mjs'
+          Write-Host "Bundle validado e build isolado: $hash"
 
       - name: Node.js 22
         uses: actions/setup-node@v4
@@ -59,7 +61,7 @@ jobs:
       - name: Generate SHA256
         shell: pwsh
         run: |
-          $exe = Get-ChildItem 'autoerp-src/release/*.exe' | Select-Object -First 1
+          $exe = Get-ChildItem 'autoerp-src/release/*.exe' | Where-Object { $_.Name -notmatch 'uninstaller' } | Select-Object -First 1
           if (-not $exe) { throw 'Instalador EXE nao encontrado.' }
           $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($exe.Name)" | Set-Content 'autoerp-src/release/SHA256.txt'
