@@ -1,0 +1,68 @@
+name: Build Seven AutoERP Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - autoerp-windows-build
+    paths:
+      - 'autoerp-windows/**'
+      - '.github/workflows/autoerp-windows-build.yml'
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore AutoERP source bundle
+        shell: pwsh
+        run: |
+          $b64 = Get-Content -Raw 'autoerp-windows/Seven-AutoERP-Windows-v1.0.0-source.zip.b64'
+          [IO.File]::WriteAllBytes('Seven-AutoERP-Windows-v1.0.0-source.zip', [Convert]::FromBase64String($b64))
+          New-Item -ItemType Directory -Force -Path autoerp-src | Out-Null
+          Expand-Archive -Path 'Seven-AutoERP-Windows-v1.0.0-source.zip' -DestinationPath autoerp-src -Force
+
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        shell: pwsh
+        working-directory: autoerp-src
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        shell: pwsh
+        working-directory: autoerp-src
+        run: npm run typecheck
+
+      - name: Build Windows installer
+        shell: pwsh
+        working-directory: autoerp-src
+        run: npm run dist:win
+
+      - name: Generate SHA256
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem 'autoerp-src/release/*.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'Instalador EXE nao encontrado.' }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          "$hash  $($exe.Name)" | Set-Content 'autoerp-src/release/SHA256.txt'
+          Get-ChildItem 'autoerp-src/release' | Format-Table Name,Length
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Seven-AutoERP-Windows-v1.0.0
+          path: |
+            autoerp-src/release/*.exe
+            autoerp-src/release/*.blockmap
+            autoerp-src/release/latest*.yml
+            autoerp-src/release/SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
