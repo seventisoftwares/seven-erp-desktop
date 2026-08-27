@@ -34,9 +34,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path autoerp-src | Out-Null
           Expand-Archive -Path $zip -DestinationPath autoerp-src -Force
           if (-not (Test-Path 'autoerp-src/package.json')) { throw 'package.json nao encontrado apos extracao.' }
-          # Evita que o Vite herde o PostCSS/Tailwind do repositorio pai.
           "export default { plugins: {} };" | Set-Content -Encoding utf8 'autoerp-src/postcss.config.mjs'
-          Write-Host "Bundle validado e build isolado: $hash"
+          $pkgPath = 'autoerp-src/package.json'
+          $pkg = Get-Content -Raw $pkgPath | ConvertFrom-Json
+          $pkg.build.win.PSObject.Properties.Remove('publisherName')
+          $pkg | ConvertTo-Json -Depth 100 | Set-Content -Encoding utf8 $pkgPath
+          Write-Host "Bundle validado, PostCSS isolado e configuracao Windows normalizada: $hash"
 
       - name: Node.js 22
         uses: actions/setup-node@v4
@@ -56,7 +59,9 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         working-directory: autoerp-src
-        run: npm run dist:win
+        run: |
+          npm run build
+          npx electron-builder --win nsis --x64 --publish never
 
       - name: Generate SHA256
         shell: pwsh
