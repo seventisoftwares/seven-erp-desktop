@@ -18,13 +18,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Restore AutoERP source bundle
+      - name: Restore and verify AutoERP source bundle
         shell: pwsh
         run: |
-          $b64 = Get-Content -Raw 'autoerp-windows/Seven-AutoERP-Windows-v1.0.0-source.zip.b64'
-          [IO.File]::WriteAllBytes('Seven-AutoERP-Windows-v1.0.0-source.zip', [Convert]::FromBase64String($b64))
+          $parts = Get-ChildItem 'autoerp-windows/bundle/part*.b64' | Sort-Object Name
+          if ($parts.Count -ne 10) { throw "Bundle incompleto: esperadas 10 partes, encontradas $($parts.Count)." }
+          $b64 = ($parts | ForEach-Object { (Get-Content -Raw $_.FullName).Trim() }) -join ''
+          if ($b64.Length -ne 49836) { throw "Base64 incompleto: tamanho $($b64.Length), esperado 49836." }
+          $zip = 'Seven-AutoERP-Windows-v1.0.0-source.zip'
+          [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'f0ce8f85c244177aab97eddffb95dd8da5b72700ae17d8f95054b9b5535c39db') {
+            throw "SHA256 do bundle invalido: $hash"
+          }
           New-Item -ItemType Directory -Force -Path autoerp-src | Out-Null
-          Expand-Archive -Path 'Seven-AutoERP-Windows-v1.0.0-source.zip' -DestinationPath autoerp-src -Force
+          Expand-Archive -Path $zip -DestinationPath autoerp-src -Force
+          if (-not (Test-Path 'autoerp-src/package.json')) { throw 'package.json nao encontrado apos extracao.' }
+          Write-Host "Bundle validado: $hash"
 
       - name: Node.js 22
         uses: actions/setup-node@v4
@@ -51,7 +61,7 @@ jobs:
         run: |
           $exe = Get-ChildItem 'autoerp-src/release/*.exe' | Select-Object -First 1
           if (-not $exe) { throw 'Instalador EXE nao encontrado.' }
-          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($exe.Name)" | Set-Content 'autoerp-src/release/SHA256.txt'
           Get-ChildItem 'autoerp-src/release' | Format-Table Name,Length
 
