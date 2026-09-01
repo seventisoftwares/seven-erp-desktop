@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import SevenErpApp from "./seven-erp-app";
 import ServiceOrdersModuleV3 from "./service-orders-module-v3";
-import IntegrationsModuleV5 from "./integrations-module-v5";
+import IntegrationsModuleV6 from "./integrations-module-v6";
 import MeshDevicesModule from "./mesh-devices-module";
 import CompanyModule from "./company-module";
 import "./erp-enhancements.css";
@@ -35,7 +35,7 @@ export default function SevenErpShell() {
     {!enhancedModule && <button className="company-nav-shortcut" onClick={() => setEnhancedModule("company")}><span>🏢</span><div><strong>Cadastro da empresa</strong><small>Dados fiscais e cadastrais</small></div></button>}
     {enhancedModule && <div className="seven-enhancement-overlay">
       {enhancedModule === "service" ? <ServiceOrdersModuleV3 onClose={() => setEnhancedModule(null)} />
-        : enhancedModule === "integrations" ? <IntegrationsModuleV5 onClose={() => setEnhancedModule(null)} />
+        : enhancedModule === "integrations" ? <IntegrationsModuleV6 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "company" ? <CompanyModule onClose={() => setEnhancedModule(null)} />
         : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
     </div>}
