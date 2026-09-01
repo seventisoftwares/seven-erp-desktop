@@ -12,7 +12,9 @@ const CONNECTORS = new Set([
   "btg",
   "certificate_partner",
   "system_policies",
+  "__company_profile",
 ]);
+const INTERNAL_CONNECTORS = new Set(["system_policies", "__company_profile"]);
 const ENVIRONMENTS = new Set(["homologation", "production", "global"]);
 
 const REQUIREMENTS: Record<string, { credential?: boolean; primary?: boolean; secondary?: boolean }> = {
@@ -41,7 +43,7 @@ function cleanText(value: unknown, maxLength = 500) {
 function cleanConfiguration(input: Record<string, unknown> | undefined) {
   const output: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(input || {})) {
-    if (!/^[a-zA-Z][a-zA-Z0-9]{0,39}$/.test(key)) continue;
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]{0,39}$/.test(key)) continue;
     if (typeof value === "boolean") output[key] = value;
     else if (typeof value === "number" && Number.isFinite(value)) output[key] = value;
     else if (typeof value === "string") output[key] = value.trim().slice(0, 1000);
@@ -55,7 +57,7 @@ function parseConfiguration(value: string | null) {
 }
 
 function validateLocalConfiguration(connector: string, credentialReference: string | null, configuration: Record<string, unknown>) {
-  if (connector === "system_policies") return [];
+  if (INTERNAL_CONNECTORS.has(connector)) return [];
   const required = REQUIREMENTS[connector] || {};
   const missing: string[] = [];
   if (required.credential && !credentialReference?.trim()) missing.push("referência da credencial/certificado");
@@ -79,7 +81,7 @@ export async function GET(request: Request) {
       configuration: parseConfiguration(row.configurationJson),
       configurationJson: undefined,
     }));
-    const operational = connections.filter((row) => row.connector !== "system_policies");
+    const operational = connections.filter((row) => !INTERNAL_CONNECTORS.has(row.connector));
     const fiscal = operational.find((row) => row.connector.startsWith("nf") || row.connector.endsWith("received"));
     const lastCheck = operational.map((row) => row.lastHealthCheckAt).filter(Boolean).sort().at(-1) || null;
     return Response.json({
@@ -117,10 +119,9 @@ export async function POST(request: Request) {
     const environment = cleanText(payload.environment, 30) || "homologation";
     if (!CONNECTORS.has(connector)) throw new ApiError("Conector inválido.", 400);
     if (!ENVIRONMENTS.has(environment)) throw new ApiError("Ambiente inválido.", 400);
-    if (connector === "system_policies" && environment !== "global") throw new ApiError("As políticas devem usar o escopo global.", 400);
+    if (INTERNAL_CONNECTORS.has(connector) && environment !== "global") throw new ApiError("Configurações internas devem usar o escopo global.", 400);
+    if (!INTERNAL_CONNECTORS.has(connector) && environment === "global") throw new ApiError("Integrações externas devem usar homologação ou produção.", 400);
 
-    // Usuários web autenticados e computadores previamente pareados podem administrar
-    // configurações. O dispositivo já possui token individual e toda mudança fica auditada.
     const identity = await resolveRequestIdentity(request);
     const db = await ensureDefaultOrganization();
     const [existing] = await db.select().from(integrationConnections).where(and(
@@ -134,8 +135,13 @@ export async function POST(request: Request) {
       const checkedAt = new Date().toISOString();
       const configuration = parseConfiguration(existing.configurationJson);
       const missing = validateLocalConfiguration(connector, existing.credentialReference, configuration);
-      const nextStatus = connector === "system_policies" ? "configuration_saved" : missing.length ? "validation_failed" : "ready_for_activation";
-      const lastError = missing.length ? `Complete os seguintes campos: ${missing.join(", ")}.` : null;
+      const isInternal = INTERNAL_CONNECTORS.has(connector);
+      const nextStatus = missing.length ? "validation_failed" : isInternal ? "configuration_saved" : "external_validation_required";
+      const lastError = missing.length
+        ? `Complete os seguintes campos: ${missing.join(", ")}.`
+        : isInternal
+          ? null
+          : "A configuração local está completa, mas a integração só pode ficar ativa após uma chamada autenticada real pelo aplicativo desktop.";
       await db.batch([
         db.update(integrationConnections).set({ status: nextStatus, lastHealthCheckAt: checkedAt, lastError, updatedAt: checkedAt }).where(eq(integrationConnections.id, existing.id)),
         db.insert(auditLogs).values({
@@ -150,7 +156,7 @@ export async function POST(request: Request) {
         lastError,
         checkedAt,
         externalRequestPerformed: false,
-        externalValidationPending: !missing.length && connector !== "system_policies",
+        externalValidationPending: !missing.length && !isInternal,
         coreModulesIndependent: true,
       });
     }
@@ -160,7 +166,7 @@ export async function POST(request: Request) {
     const savedAt = new Date().toISOString();
     const id = existing?.id || crypto.randomUUID();
     const hasUsefulConfiguration = Boolean(credentialReference || Object.values(configuration).some((value) => String(value).trim()));
-    const status = connector === "system_policies" ? "configuration_saved" : hasUsefulConfiguration ? "configuration_saved" : "configuration_pending";
+    const status = INTERNAL_CONNECTORS.has(connector) ? "configuration_saved" : hasUsefulConfiguration ? "configuration_saved" : "configuration_pending";
     const values = {
       id,
       organizationId: identity.organizationId,
