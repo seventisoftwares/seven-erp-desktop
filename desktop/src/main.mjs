@@ -8,6 +8,7 @@ import { createLocalCore } from "./local-core.mjs";
 import { createMesh } from "./mesh.mjs";
 import { createCertificateVault } from "./certificate-vault.mjs";
 import { createSecretVault } from "./secret-vault.mjs";
+import { createFiscalDocumentStore } from "./fiscal-document-store.mjs";
 import { createErpServices } from "./erp-services.mjs";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +19,7 @@ let localCore = null;
 let mesh = null;
 let certificateVault = null;
 let secretVault = null;
+let fiscalDocumentStore = null;
 let erpServices = null;
 
 function userDataPath(file) { return path.join(app.getPath("userData"), file); }
@@ -238,7 +240,8 @@ else {
 
     certificateVault = createCertificateVault({ dataDir: app.getPath("userData"), readJson, writeJson });
     secretVault = createSecretVault({ dataDir: app.getPath("userData") });
-    erpServices = createErpServices({ core: localCore, certificateVault, secretVault });
+    fiscalDocumentStore = createFiscalDocumentStore({ dataDir: app.getPath("userData") });
+    erpServices = createErpServices({ core: localCore, certificateVault, secretVault, fiscalDocumentStore });
 
     mesh = createMesh({ core: localCore, deviceId: config.deviceId, getDeviceName, appVersion: app.getVersion(), getWorkspace, setWorkspace, onStatus: broadcastStatus });
     await mesh.start();
@@ -257,6 +260,8 @@ else {
     ipcMain.handle("seven:integration-secrets-status", (_event, connector) => secretVault.status(connector));
     ipcMain.handle("seven:integration-secrets-remove", (_event, connector) => secretVault.remove(connector));
     ipcMain.handle("seven:integration-test", (_event, payload) => erpServices.testIntegration(payload));
+    ipcMain.handle("seven:dfe-sync", (_event, payload) => erpServices.syncDfe(payload));
+    ipcMain.handle("seven:dfe-list", () => erpServices.listReceivedDfe());
 
     createWindow();
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

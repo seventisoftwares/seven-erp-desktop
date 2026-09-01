@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld("sevenDesktop", {
   integrationSecretsStatus: (connector) => ipcRenderer.invoke("seven:integration-secrets-status", connector),
   integrationSecretsRemove: (connector) => ipcRenderer.invoke("seven:integration-secrets-remove", connector),
   integrationTest: (payload) => ipcRenderer.invoke("seven:integration-test", payload),
+  dfeSync: (payload) => ipcRenderer.invoke("seven:dfe-sync", payload),
+  dfeList: () => ipcRenderer.invoke("seven:dfe-list"),
   onStatus: (callback) => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on("seven:status", listener);
