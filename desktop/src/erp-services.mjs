@@ -1,4 +1,5 @@
 import { net } from "electron";
+import { validateFiscalIntegration } from "./fiscal-integrations.mjs";
 
 const digits = (value) => String(value || "").replace(/\D/g, "");
 const text = (value) => String(value || "").trim();
@@ -56,6 +57,7 @@ export function createErpServices({ core, certificateVault, secretVault }) {
     if (connector === "nfe_sefaz") {
       if (!text(config.stateRegistration || company?.stateRegistration)) blockers.push("Informe a Inscrição Estadual.");
       if (!/^[A-Z]{2}$/.test(text(config.uf || company?.state).toUpperCase())) blockers.push("Informe a UF do estabelecimento.");
+      if (!text(config.statusServiceUrl || config.apiBaseUrl)) blockers.push("Informe a URL HTTPS do serviço NFeStatusServico4 da SEFAZ/autorizador da UF.");
       if (config.enableNfce && !text(config.cscId)) blockers.push("Para NFC-e, informe o ID do CSC fornecido pela SEFAZ.");
     }
     if (connector === "nfse_national") {
@@ -72,18 +74,31 @@ export function createErpServices({ core, certificateVault, secretVault }) {
       const fiscalSecrets = await secretVault.get("nfe_sefaz");
       if (!text(fiscalSecrets.cscToken)) blockers.push("Para NFC-e, informe o CSC/Token e salve-o no cofre seguro deste computador.");
     }
+
     if (config.certificateId) {
-      const certificate = await certificateVault.validate(config.certificateId);
-      if (!certificate.valid) blockers.push(`Certificado A1 inválido neste computador: ${certificate.error || "falha ao abrir PKCS#12"}`);
+      const certificateValidation = await certificateVault.validate(config.certificateId);
+      if (!certificateValidation.valid) blockers.push(`Certificado A1 inválido neste computador: ${certificateValidation.error || "falha ao abrir PKCS#12"}`);
     }
-    return {
-      ok: blockers.length === 0,
-      status: blockers.length ? "validation_failed" : "certificate_validated",
-      blockers,
-      message: blockers.length ? "Há pendências na configuração fiscal." : "Certificado A1 aberto com sucesso e cadastro fiscal mínimo conferido. A transmissão oficial ainda depende do credenciamento e da homologação no autorizador competente.",
-      externalRequestPerformed: false,
-      checkedAt: new Date().toISOString(),
-    };
+
+    if (blockers.length) {
+      return {
+        ok: false,
+        status: "validation_failed",
+        blockers,
+        message: "Há pendências que impedem a conexão fiscal externa.",
+        externalRequestPerformed: false,
+        checkedAt: new Date().toISOString(),
+      };
+    }
+
+    const certificate = await certificateVault.loadSecret(config.certificateId);
+    return validateFiscalIntegration({
+      connector,
+      environment: config.environment === "production" ? "production" : "homologation",
+      configuration: config,
+      company,
+      certificate,
+    });
   }
 
   async function testBanrisul(config) {
@@ -127,10 +142,10 @@ export function createErpServices({ core, certificateVault, secretVault }) {
     if (!text(config.accountId)) blockers.push("Informe o Account ID/identificador da conta beneficiária.");
     if (!text(config.scopes).includes("openid")) blockers.push("Inclua o escopo openid no fluxo de Authorization Code para Banking.");
     return {
-      ok: blockers.length === 0,
-      status: blockers.length ? "validation_failed" : "authorization_required",
-      blockers,
-      message: blockers.length ? "Configuração BTG incompleta." : "Aplicativo configurado. Para APIs de Banking (boleto, Pix e movimentações), conclua o fluxo OAuth Authorization Code e o consentimento do usuário da conta PJ; Client Credentials isoladamente não libera essas APIs.",
+      ok: false,
+      status: blockers.length ? "validation_failed" : "implementation_required",
+      blockers: blockers.length ? blockers : ["O fluxo OAuth Authorization Code/PKCE e callback do BTG ainda precisa ser implementado no desktop."],
+      message: blockers.length ? "Configuração BTG incompleta." : "Configuração conferida, mas o ERP não marcará BTG como ativo sem concluir uma autorização real no provedor.",
       externalRequestPerformed: false,
       checkedAt: new Date().toISOString(),
     };
@@ -138,7 +153,7 @@ export function createErpServices({ core, certificateVault, secretVault }) {
 
   async function testIntegration(payload = {}) {
     const connector = text(payload.connector);
-    const config = payload.configuration && typeof payload.configuration === "object" ? payload.configuration : {};
+    const config = payload.configuration && typeof payload.configuration === "object" ? { ...payload.configuration, environment: payload.environment || payload.configuration.environment } : {};
     if (["nfe_sefaz", "nfse_national", "nfe_distribution", "cte_received", "mdfe_received"].includes(connector)) return testFiscal(connector, config);
     if (connector === "banrisul") return testBanrisul(config);
     if (connector === "btg") return testBtg(config);
@@ -146,7 +161,14 @@ export function createErpServices({ core, certificateVault, secretVault }) {
       const blockers = [];
       if (!text(config.partnerCode)) blockers.push("Informe o código do parceiro/AR.");
       if (!text(config.apiBaseUrl)) blockers.push("Informe a URL da API fornecida pelo parceiro.");
-      return { ok: blockers.length === 0, status: blockers.length ? "validation_failed" : "provider_configured", blockers, message: blockers.length ? "Dados do parceiro incompletos." : "Configuração do parceiro salva. A ativação depende da documentação e das credenciais fornecidas pela API contratada.", externalRequestPerformed: false, checkedAt: new Date().toISOString() };
+      return {
+        ok: false,
+        status: blockers.length ? "validation_failed" : "implementation_required",
+        blockers: blockers.length ? blockers : ["A operação real depende do contrato e da autenticação definida pela API do parceiro de certificados."],
+        message: blockers.length ? "Dados do parceiro incompletos." : "Configuração salva, mas não será marcada como ativa sem uma chamada autenticada real ao parceiro.",
+        externalRequestPerformed: false,
+        checkedAt: new Date().toISOString(),
+      };
     }
     return { ok: false, status: "validation_failed", blockers: ["Integração desconhecida."], message: "Conector inválido.", externalRequestPerformed: false };
   }
