@@ -9,6 +9,8 @@ import { createMesh } from "./mesh.mjs";
 import { createCertificateVault } from "./certificate-vault.mjs";
 import { createSecretVault } from "./secret-vault.mjs";
 import { createFiscalDocumentStore } from "./fiscal-document-store.mjs";
+import { createNfeSequenceStore } from "./nfe-sequence-store.mjs";
+import { createNfeService } from "./nfe-service.mjs";
 import { createErpServices } from "./erp-services.mjs";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -20,6 +22,8 @@ let mesh = null;
 let certificateVault = null;
 let secretVault = null;
 let fiscalDocumentStore = null;
+let nfeSequenceStore = null;
+let nfeService = null;
 let erpServices = null;
 
 function userDataPath(file) { return path.join(app.getPath("userData"), file); }
@@ -179,9 +183,16 @@ async function requestLocal(apiPath, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
   let payload = {};
   try { payload = options.body ? JSON.parse(options.body) : {}; } catch { payload = {}; }
+
   if (url.pathname === "/api/company") {
     const result = await erpServices.companyApi(method, payload);
     if (result.ok && method !== "GET") void mesh?.syncAll();
+    return result;
+  }
+
+  if (url.pathname === "/api/nfe-drafts") {
+    const result = await nfeService.api(method, payload);
+    if (result.ok && method === "POST" && !payload.action) void mesh?.syncAll();
     return result;
   }
 
@@ -241,7 +252,17 @@ else {
     certificateVault = createCertificateVault({ dataDir: app.getPath("userData"), readJson, writeJson });
     secretVault = createSecretVault({ dataDir: app.getPath("userData") });
     fiscalDocumentStore = createFiscalDocumentStore({ dataDir: app.getPath("userData") });
+    nfeSequenceStore = createNfeSequenceStore({ dataDir: app.getPath("userData") });
     erpServices = createErpServices({ core: localCore, certificateVault, secretVault, fiscalDocumentStore });
+    nfeService = createNfeService({
+      dataDir: app.getPath("userData"),
+      core: localCore,
+      certificateVault,
+      secretVault,
+      fiscalDocumentStore,
+      sequenceStore: nfeSequenceStore,
+      appVersion: app.getVersion(),
+    });
 
     mesh = createMesh({ core: localCore, deviceId: config.deviceId, getDeviceName, appVersion: app.getVersion(), getWorkspace, setWorkspace, onStatus: broadcastStatus });
     await mesh.start();
