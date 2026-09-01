@@ -64,7 +64,7 @@ export function extractSigningMaterialFromPfx({ pfx, passphrase = "" }) {
 
 export function signNfeXml({ xml, pfx, passphrase = "" }) {
   const source = String(xml || "").trim();
-  if (!/<infNFe\b[^>]*\bId=["']NFe\d{44}["']/i.test(source)) throw new Error("XML NF-e sem infNFe/Id válido para assinatura.");
+  if (!/<infNFe\b[^>]*\bId=["']NFe[A-Z0-9]{44}["']/i.test(source)) throw new Error("XML NF-e sem infNFe/Id válido para assinatura.");
   if (/<(?:\w+:)?Signature\b/i.test(source)) throw new Error("O XML informado já contém assinatura digital.");
 
   const material = extractSigningMaterialFromPfx({ pfx, passphrase });
