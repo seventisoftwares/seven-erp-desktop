@@ -7,7 +7,8 @@ import { buildConsultProtocolXml, parseAuthorizationResponse } from "../src/nfe-
 
 const require = createRequire(import.meta.url);
 const forge = require("node-forge");
-const { SignedXml, xpath } = require("xml-crypto");
+const { SignedXml } = require("xml-crypto");
+const xpath = require("xpath");
 const { DOMParser } = require("@xmldom/xmldom");
 
 const company = {
@@ -144,7 +145,8 @@ test("XMLDSig signs infNFe with the PFX private key and the signature verifies",
   assert.match(signed.signedXml, /<X509Certificate>[^<]+<\/X509Certificate>/);
 
   const document = new DOMParser().parseFromString(signed.signedXml);
-  const signatureNode = xpath(document, "//*[local-name(.)='Signature']")[0];
+  const signatureNode = xpath.select("//*[local-name(.)='Signature']", document)[0];
+  assert.ok(signatureNode, "Signature element should exist in the signed XML");
   const verifier = new SignedXml({ publicCert: certificatePem });
   verifier.loadSignature(signatureNode);
   assert.equal(verifier.checkSignature(signed.signedXml), true);
