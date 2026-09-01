@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import SevenErpApp from "./seven-erp-app";
 import ServiceOrdersModuleV3 from "./service-orders-module-v3";
 import IntegrationsModuleV6 from "./integrations-module-v6";
+import DfeReceivedModule from "./dfe-received-module";
 import MeshDevicesModule from "./mesh-devices-module";
 import CompanyModule from "./company-module";
 import "./erp-enhancements.css";
 import "./erp-professional.css";
 
-type EnhancedModule = "service" | "integrations" | "devices" | "company" | null;
+type EnhancedModule = "service" | "integrations" | "dfe" | "devices" | "company" | null;
 
 export default function SevenErpShell() {
   const [enhancedModule, setEnhancedModule] = useState<EnhancedModule>(null);
@@ -21,6 +22,7 @@ export default function SevenErpShell() {
       if (!button) return;
       const label = (button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
       if (label.includes("integrações e ajustes")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("integrations"); return; }
+      if (label.includes("manifestação nf-e") || label.includes("manifestacao nf-e")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("dfe"); return; }
       if (label.includes("ordem de serviço") || label.includes("ordens de serviço")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("service"); return; }
       if (label.includes("dispositivos e sincronização")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("devices"); return; }
       if (label.includes("cadastro da empresa")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("company"); return; }
@@ -36,6 +38,7 @@ export default function SevenErpShell() {
     {enhancedModule && <div className="seven-enhancement-overlay">
       {enhancedModule === "service" ? <ServiceOrdersModuleV3 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "integrations" ? <IntegrationsModuleV6 onClose={() => setEnhancedModule(null)} />
+        : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "company" ? <CompanyModule onClose={() => setEnhancedModule(null)} />
         : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
     </div>}
