@@ -1,21 +1,9 @@
 import { net } from "electron";
 import { requestDfeDistribution, validateFiscalIntegration } from "./fiscal-integrations.mjs";
+import { normalizeCnpj, validateCnpj } from "./nfe-xml.mjs";
 
 const digits = (value) => String(value || "").replace(/\D/g, "");
 const text = (value) => String(value || "").trim();
-
-function validCnpj(value) {
-  const cnpj = digits(value);
-  if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) return false;
-  const calc = (base, weights) => {
-    const sum = base.split("").reduce((total, digit, index) => total + Number(digit) * weights[index], 0);
-    const remainder = sum % 11;
-    return remainder < 2 ? 0 : 11 - remainder;
-  };
-  const d1 = calc(cnpj.slice(0, 12), [5,4,3,2,9,8,7,6,5,4,3,2]);
-  const d2 = calc(cnpj.slice(0, 12) + d1, [6,5,4,3,2,9,8,7,6,5,4,3,2]);
-  return cnpj === cnpj.slice(0, 12) + String(d1) + String(d2);
-}
 
 export function createErpServices({ core, certificateVault, secretVault, fiscalDocumentStore }) {
   async function getConnections() {
@@ -33,18 +21,20 @@ export function createErpServices({ core, certificateVault, secretVault, fiscalD
     if (method === "GET") return { status: 200, ok: true, headers: { "content-type": "application/json" }, body: JSON.stringify({ company: await getCompany(), local: true }) };
     if (method !== "POST") return { status: 405, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Método não permitido" }) };
     const company = {
-      legalName: text(payload.legalName), tradeName: text(payload.tradeName), taxId: digits(payload.taxId),
+      legalName: text(payload.legalName), tradeName: text(payload.tradeName), taxId: normalizeCnpj(payload.taxId),
       stateRegistration: text(payload.stateRegistration), municipalRegistration: text(payload.municipalRegistration),
       taxRegime: text(payload.taxRegime), cnae: text(payload.cnae), postalCode: digits(payload.postalCode), street: text(payload.street),
       number: text(payload.number), complement: text(payload.complement), district: text(payload.district), city: text(payload.city),
       cityCode: digits(payload.cityCode), state: text(payload.state).toUpperCase(), email: text(payload.email).toLowerCase(), phone: text(payload.phone),
-      website: text(payload.website), nfeSeries: text(payload.nfeSeries) || "1", nfceSeries: text(payload.nfceSeries) || "1",
-      invoiceEmail: text(payload.invoiceEmail).toLowerCase(), notes: text(payload.notes), updatedAt: new Date().toISOString(),
+      website: text(payload.website), nfeSeries: digits(payload.nfeSeries) || "1", nfeNextNumber: digits(payload.nfeNextNumber) || "",
+      nfceSeries: digits(payload.nfceSeries) || "1", invoiceEmail: text(payload.invoiceEmail).toLowerCase(), notes: text(payload.notes), updatedAt: new Date().toISOString(),
     };
     if (!company.legalName) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Razão social é obrigatória." }) };
-    if (!validCnpj(company.taxId)) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Informe um CNPJ válido." }) };
+    if (!validateCnpj(company.taxId)) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Informe um CNPJ válido, inclusive no padrão alfanumérico quando aplicável." }) };
     if (!/^[A-Z]{2}$/.test(company.state)) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "UF deve conter 2 letras." }) };
     if (company.cityCode && company.cityCode.length !== 7) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Código IBGE deve ter 7 dígitos." }) };
+    if (Number(company.nfeSeries) > 999) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Série NF-e deve estar entre 0 e 999." }) };
+    if (company.nfeNextNumber && (Number(company.nfeNextNumber) < 1 || Number(company.nfeNextNumber) > 999999999)) return { status: 400, ok: false, headers: { "content-type": "application/json" }, body: JSON.stringify({ error: "Próximo número NF-e deve estar entre 1 e 999999999." }) };
     const result = await core.apiRequest("/api/integrations", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "save", connector: "__company_profile", environment: "global", credentialReference: "company-profile", configuration: company }),
@@ -55,8 +45,8 @@ export function createErpServices({ core, certificateVault, secretVault, fiscalD
 
   function fiscalRequirements(connector, config, company) {
     const blockers = [];
-    const cnpj = digits(config.cnpj || company?.taxId);
-    if (!validCnpj(cnpj)) blockers.push("Cadastre um CNPJ válido para o estabelecimento.");
+    const cnpj = normalizeCnpj(config.cnpj || company?.taxId);
+    if (!validateCnpj(cnpj)) blockers.push("Cadastre um CNPJ válido para o estabelecimento.");
     if (!config.certificateId) blockers.push("Importe e selecione um certificado digital A1 (.PFX/.P12).");
     if (connector === "nfe_sefaz") {
       if (!text(config.stateRegistration || company?.stateRegistration)) blockers.push("Informe a Inscrição Estadual.");
@@ -98,7 +88,7 @@ export function createErpServices({ core, certificateVault, secretVault, fiscalD
   async function syncDfe(payload = {}) {
     const environment = payload.environment === "production" ? "production" : "homologation";
     const company = await getCompany();
-    if (!company || !validCnpj(company.taxId)) throw new Error("Cadastre a empresa com CNPJ válido antes de sincronizar DF-e.");
+    if (!company || !validateCnpj(company.taxId)) throw new Error("Cadastre a empresa com CNPJ válido antes de sincronizar DF-e.");
 
     const connection = (await getConnections()).find((item) => item.connector === "nfe_distribution" && item.environment === environment);
     if (!connection) throw new Error(`Configure a integração Distribuição / Manifestação NF-e no ambiente de ${environment === "production" ? "produção" : "homologação"}.`);
