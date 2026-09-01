@@ -29,6 +29,12 @@ test("DFe distribution envelope follows distNSU 1.01 and pads cursor", () => {
   assert.match(xml, /<ultNSU>000000000000123<\/ultNSU>/);
 });
 
+test("DFe distribution envelope preserves alphanumeric CNPJ positions", () => {
+  const xml = buildDfeDistributionEnvelope({ environment: "homologation", uf: "RS", cnpj: "12ABC34501DE35", lastNsu: "0" });
+  assert.match(xml, /<CNPJ>12ABC34501DE35<\/CNPJ>/);
+  assert.match(xml, /<tpAmb>2<\/tpAmb>/);
+});
+
 test("distributed NF-e metadata is extracted from real XML shape", () => {
   const accessKey = "43260912345678000190550010000001231000001234";
   const parsed = parseDistributedNfePackage({ nsu: "000000000000999", schema: "procNFe_v4.00.xsd", documentXml: `<nfeProc><NFe><infNFe Id="NFe${accessKey}"><ide><mod>55</mod><dhEmi>2026-09-01T10:00:00-03:00</dhEmi></ide><emit><CNPJ>12345678000190</CNPJ><xNome>EMPRESA TESTE</xNome></emit><total><ICMSTot><vNF>123.45</vNF></ICMSTot></total></infNFe></NFe></nfeProc>` });
@@ -36,6 +42,14 @@ test("distributed NF-e metadata is extracted from real XML shape", () => {
   assert.equal(parsed.nsu, "000000000000999");
   assert.equal(parsed.issuerName, "EMPRESA TESTE");
   assert.equal(parsed.totalCents, 12345);
+});
+
+test("distributed parser preserves alphanumeric NF-e key and issuer CNPJ", () => {
+  const accessKey = "43260912ABC34501DE35550010000001231000001234";
+  const parsed = parseDistributedNfePackage({ nsu: "000000000001000", schema: "procNFe_v4.00.xsd", documentXml: `<nfeProc><NFe><infNFe Id="NFe${accessKey}"><ide><mod>55</mod><dhEmi>2026-09-01T10:00:00-03:00</dhEmi></ide><emit><CNPJ>12ABC34501DE35</CNPJ><xNome>EMITENTE ALFANUMERICO</xNome></emit><total><ICMSTot><vNF>10.00</vNF></ICMSTot></total></infNFe></NFe></nfeProc>` });
+  assert.equal(parsed.accessKey, accessKey);
+  assert.equal(parsed.issuerTaxId, "12ABC34501DE35");
+  assert.equal(parsed.totalCents, 1000);
 });
 
 test("official fiscal bases are HTTPS and separated by environment", () => {
