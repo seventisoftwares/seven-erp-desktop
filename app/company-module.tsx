@@ -6,11 +6,12 @@ type CompanyProfile = {
   legalName?: string; tradeName?: string; taxId?: string; stateRegistration?: string; municipalRegistration?: string;
   taxRegime?: string; cnae?: string; postalCode?: string; street?: string; number?: string; complement?: string;
   district?: string; city?: string; cityCode?: string; state?: string; email?: string; phone?: string; website?: string;
-  nfeSeries?: string; nfceSeries?: string; invoiceEmail?: string; notes?: string; updatedAt?: string;
+  nfeSeries?: string; nfeNextNumber?: string; nfceSeries?: string; invoiceEmail?: string; notes?: string; updatedAt?: string;
 };
 
-const empty: CompanyProfile = { state: "RS", taxRegime: "simples_nacional", nfeSeries: "1", nfceSeries: "1" };
+const empty: CompanyProfile = { state: "RS", taxRegime: "simples_nacional", nfeSeries: "1", nfeNextNumber: "", nfceSeries: "1" };
 const digits = (value: string) => value.replace(/\D/g, "");
+const taxIdChars = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 export default function CompanyModule({ onClose }: { onClose: () => void }) {
   const [profile, setProfile] = useState<CompanyProfile>(empty);
@@ -35,11 +36,18 @@ export default function CompanyModule({ onClose }: { onClose: () => void }) {
     event.preventDefault(); setSaving(true); setError(""); setNotice("");
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries()) as Record<string, string>;
-    const cnpj = digits(payload.taxId || "");
-    if (cnpj.length !== 14) { setSaving(false); setError("Informe um CNPJ válido com 14 dígitos."); return; }
+    const cnpj = taxIdChars(payload.taxId || "");
+    if (cnpj.length !== 14) { setSaving(false); setError("Informe um CNPJ válido com 14 posições; letras são aceitas no padrão alfanumérico vigente."); return; }
     if (!payload.legalName?.trim()) { setSaving(false); setError("Razão social é obrigatória."); return; }
     if (!/^[A-Z]{2}$/.test((payload.state || "").toUpperCase())) { setSaving(false); setError("Informe a UF com 2 letras."); return; }
     if (payload.cityCode && digits(payload.cityCode).length !== 7) { setSaving(false); setError("Código IBGE do município deve ter 7 dígitos."); return; }
+    const nfeSeries = Number(digits(payload.nfeSeries || ""));
+    if (!Number.isInteger(nfeSeries) || nfeSeries < 0 || nfeSeries > 999) { setSaving(false); setError("A série NF-e deve estar entre 0 e 999."); return; }
+    const nextNumberText = digits(payload.nfeNextNumber || "");
+    if (nextNumberText && (Number(nextNumberText) < 1 || Number(nextNumberText) > 999999999)) { setSaving(false); setError("O próximo número NF-e deve estar entre 1 e 999999999."); return; }
+    payload.taxId = cnpj;
+    payload.nfeSeries = String(nfeSeries);
+    payload.nfeNextNumber = nextNumberText;
     try {
       const response = await fetch("/api/company", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       const data = await response.json();
@@ -57,7 +65,7 @@ export default function CompanyModule({ onClose }: { onClose: () => void }) {
       <section className="company-section"><div className="company-section-title"><span>01</span><div><h2>Identificação</h2><p>Dados cadastrais e tributários da pessoa jurídica.</p></div></div><div className="form-grid two">
         <label className="full"><span>Razão social *</span><input name="legalName" required defaultValue={profile.legalName || ""} /></label>
         <label><span>Nome fantasia</span><input name="tradeName" defaultValue={profile.tradeName || ""} /></label>
-        <label><span>CNPJ *</span><input name="taxId" required inputMode="numeric" defaultValue={profile.taxId || ""} placeholder="00.000.000/0000-00" /></label>
+        <label><span>CNPJ *</span><input name="taxId" required defaultValue={profile.taxId || ""} placeholder="14 posições — numérico ou alfanumérico" maxLength={18} style={{ textTransform: "uppercase" }} /></label>
         <label><span>Inscrição Estadual</span><input name="stateRegistration" defaultValue={profile.stateRegistration || ""} /></label>
         <label><span>Inscrição Municipal</span><input name="municipalRegistration" defaultValue={profile.municipalRegistration || ""} /></label>
         <label><span>Regime tributário *</span><select name="taxRegime" defaultValue={profile.taxRegime || "simples_nacional"}><option value="mei">MEI</option><option value="simples_nacional">Simples Nacional</option><option value="simples_excesso">Simples Nacional - excesso sublimite</option><option value="lucro_presumido">Lucro Presumido</option><option value="lucro_real">Lucro Real</option></select></label>
@@ -72,8 +80,8 @@ export default function CompanyModule({ onClose }: { onClose: () => void }) {
       <section className="company-section"><div className="company-section-title"><span>03</span><div><h2>Contato e documentos</h2><p>Dados exibidos em impressões e comunicações.</p></div></div><div className="form-grid two">
         <label><span>E-mail</span><input name="email" type="email" defaultValue={profile.email || ""} /></label><label><span>Telefone</span><input name="phone" defaultValue={profile.phone || ""} /></label>
         <label><span>Site</span><input name="website" defaultValue={profile.website || ""} /></label><label><span>E-mail fiscal</span><input name="invoiceEmail" type="email" defaultValue={profile.invoiceEmail || ""} /></label>
-        <label><span>Série padrão NF-e</span><input name="nfeSeries" inputMode="numeric" defaultValue={profile.nfeSeries || "1"} /></label><label><span>Série padrão NFC-e</span><input name="nfceSeries" inputMode="numeric" defaultValue={profile.nfceSeries || "1"} /></label>
-        <label className="full"><span>Observações internas</span><textarea name="notes" rows={3} defaultValue={profile.notes || ""} /></label>
+        <label><span>Série padrão NF-e</span><input name="nfeSeries" inputMode="numeric" defaultValue={profile.nfeSeries || "1"} /></label><label><span>Próximo número NF-e</span><input name="nfeNextNumber" inputMode="numeric" defaultValue={profile.nfeNextNumber || ""} placeholder="Obrigatório antes da 1ª transmissão" /><small>Informe o próximo número livre da série. O ERP não presume que começa em 1.</small></label>
+        <label><span>Série padrão NFC-e</span><input name="nfceSeries" inputMode="numeric" defaultValue={profile.nfceSeries || "1"} /></label><label className="full"><span>Observações internas</span><textarea name="notes" rows={3} defaultValue={profile.notes || ""} /></label>
       </div></section>
       <footer className="company-save-bar"><div><strong>{profile.updatedAt ? "Cadastro existente" : "Cadastro inicial"}</strong><span>{profile.updatedAt ? `Última alteração: ${new Date(profile.updatedAt).toLocaleString("pt-BR")}` : "Preencha os dados oficiais da empresa."}</span></div><button className="enhanced-primary" disabled={saving}>{saving ? "Salvando..." : "Salvar cadastro da empresa"}</button></footer>
     </form>}

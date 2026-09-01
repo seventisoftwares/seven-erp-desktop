@@ -20,6 +20,7 @@ const DFE_DISTRIBUTION_URLS = Object.freeze({
 
 const text = (value) => String(value ?? "").trim();
 const digits = (value) => String(value ?? "").replace(/\D/g, "");
+const alphaNum = (value) => String(value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 function safeExcerpt(value, maxLength = 450) {
   return text(value).replace(/\s+/g, " ").slice(0, maxLength);
@@ -47,8 +48,8 @@ function requireHttps(value, label) {
   return url.toString().replace(/\/$/, "");
 }
 
-function extractXmlTag(xml, tag) {
-  const match = String(xml || "").match(new RegExp(`<(?:\\w+:)?${tag}[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${tag}>`, "i"));
+function extractXmlTag(source, tag) {
+  const match = String(source || "").match(new RegExp(`<(?:\\w+:)?${tag}[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${tag}>`, "i"));
   return match ? match[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : "";
 }
 
@@ -66,8 +67,8 @@ function buildNfeStatusEnvelope({ environment, uf }) {
 function buildDfeDistributionEnvelope({ environment, uf, cnpj, lastNsu = "0" }) {
   const cUFAutor = UF_CODES[text(uf).toUpperCase()];
   if (!cUFAutor) throw new Error("UF inválida para distribuição DF-e.");
-  const cleanCnpj = digits(cnpj);
-  if (!/^\d{14}$/.test(cleanCnpj)) throw new Error("CNPJ inválido para distribuição DF-e.");
+  const cleanCnpj = alphaNum(cnpj);
+  if (!/^[A-Z0-9]{12}\d{2}$/.test(cleanCnpj)) throw new Error("CNPJ inválido para distribuição DF-e.");
   const tpAmb = environment === "production" ? "1" : "2";
   const ultNSU = digits(lastNsu).slice(-15).padStart(15, "0");
   return `<?xml version="1.0" encoding="UTF-8"?>` +
@@ -78,11 +79,11 @@ function buildDfeDistributionEnvelope({ environment, uf, cnpj, lastNsu = "0" }) 
     `</nfeDadosMsg></nfeDistDFeInteresse></soap:Body></soap:Envelope>`;
 }
 
-function parseDocZipNodes(xml) {
+function parseDocZipNodes(source) {
   const packages = [];
   const matcher = /<(?:\w+:)?docZip\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?docZip>/gi;
   let match;
-  while ((match = matcher.exec(String(xml || ""))) !== null) {
+  while ((match = matcher.exec(String(source || ""))) !== null) {
     const attrs = match[1] || "";
     const nsu = (attrs.match(/\bNSU\s*=\s*["']([^"']+)["']/i) || [])[1] || "";
     const schema = (attrs.match(/\bschema\s*=\s*["']([^"']+)["']/i) || [])[1] || "";
@@ -106,125 +107,64 @@ function centsFromDecimal(value) {
 
 function parseDistributedNfePackage(pkg) {
   if (!pkg?.documentXml) return null;
-  const xml = pkg.documentXml;
-  const accessKey = digits(extractXmlTag(xml, "chNFe") || ((xml.match(/\bId=["']NFe(\d{44})["']/i) || [])[1] || ""));
-  if (!/^\d{44}$/.test(accessKey)) return null;
-  const issuerTaxId = digits(extractXmlTag(xml, "CNPJ") || extractXmlTag(xml, "CPF")) || null;
-  const issuerName = extractXmlTag(xml, "xNome") || "Emitente não informado";
-  const issueDate = extractXmlTag(xml, "dhEmi") || extractXmlTag(xml, "dEmi") || null;
-  const totalCents = centsFromDecimal(extractXmlTag(xml, "vNF"));
-  const model = accessKey.slice(20, 22) || extractXmlTag(xml, "mod") || "55";
-  return {
-    accessKey,
-    nsu: text(pkg.nsu) || null,
-    schema: text(pkg.schema) || null,
-    model,
-    issuerTaxId,
-    issuerName,
-    issueDate,
-    totalCents,
-    xml: xml,
-  };
+  const documentXml = pkg.documentXml;
+  const rawKey = extractXmlTag(documentXml, "chNFe") || ((documentXml.match(/\bId=["']NFe([A-Z0-9]{44})["']/i) || [])[1] || "");
+  const accessKey = alphaNum(rawKey);
+  if (!/^[A-Z0-9]{44}$/.test(accessKey)) return null;
+  const cnpj = alphaNum(extractXmlTag(documentXml, "CNPJ"));
+  const cpf = digits(extractXmlTag(documentXml, "CPF"));
+  const issuerTaxId = cnpj || cpf || null;
+  const issuerName = extractXmlTag(documentXml, "xNome") || "Emitente não informado";
+  const issueDate = extractXmlTag(documentXml, "dhEmi") || extractXmlTag(documentXml, "dEmi") || null;
+  const totalCents = centsFromDecimal(extractXmlTag(documentXml, "vNF"));
+  const model = accessKey.slice(20, 22) || extractXmlTag(documentXml, "mod") || "55";
+  return { accessKey, nsu: text(pkg.nsu) || null, schema: text(pkg.schema) || null, model, issuerTaxId, issuerName, issueDate, totalCents, xml: documentXml };
 }
 
 async function validateNfeStatus({ environment, configuration, company, certificate }) {
   const endpoint = requireHttps(configuration.statusServiceUrl || configuration.apiBaseUrl, "URL do serviço NFeStatusServico4");
   const uf = text(configuration.uf || company?.state).toUpperCase();
   const body = buildNfeStatusEnvelope({ environment, uf });
-
   try {
     const response = await requestMtls({
       url: endpoint,
       method: "POST",
       pfx: certificate.pfx,
       passphrase: certificate.passphrase,
-      headers: {
-        accept: "application/soap+xml, application/xml, text/xml",
-        "content-type": "application/soap+xml; charset=utf-8",
-        "user-agent": "Seven-AutoERP/production",
-      },
+      headers: { accept: "application/soap+xml, application/xml, text/xml", "content-type": "application/soap+xml; charset=utf-8", "user-agent": "Seven-AutoERP/production" },
       body,
     });
     const cStat = extractXmlTag(response.rawBody, "cStat");
     const xMotivo = extractXmlTag(response.rawBody, "xMotivo");
-    const serviceResponded = Boolean(cStat);
-
-    if (serviceResponded) {
-      return {
-        ok: true,
-        status: "active",
-        blockers: [],
-        message: `SEFAZ respondeu à consulta real de status${cStat ? ` (cStat ${cStat})` : ""}${xMotivo ? `: ${xMotivo}` : "."}`,
-        endpoint,
-        httpStatus: response.status,
-        cStat,
-        xMotivo,
-        externalRequestPerformed: true,
-        checkedAt: new Date().toISOString(),
-      };
+    if (cStat) {
+      return { ok: true, status: "active", blockers: [], message: `SEFAZ respondeu à consulta real de status (cStat ${cStat})${xMotivo ? `: ${xMotivo}` : "."}`, endpoint, httpStatus: response.status, cStat, xMotivo, externalRequestPerformed: true, checkedAt: new Date().toISOString() };
     }
-
-    return {
-      ok: false,
-      status: response.status === 401 || response.status === 403 ? "external_auth_failed" : "external_response_invalid",
-      blockers: [`O endpoint respondeu HTTP ${response.status}, mas não retornou cStat da SEFAZ.`],
-      message: safeExcerpt(response.rawBody) || response.statusMessage || "Resposta sem conteúdo reconhecível.",
-      endpoint,
-      httpStatus: response.status,
-      externalRequestPerformed: true,
-      checkedAt: new Date().toISOString(),
-    };
-  } catch (error) {
-    return externalFailure(error, endpoint);
-  }
+    return { ok: false, status: response.status === 401 || response.status === 403 ? "external_auth_failed" : "external_response_invalid", blockers: [`O endpoint respondeu HTTP ${response.status}, mas não retornou cStat da SEFAZ.`], message: safeExcerpt(response.rawBody) || response.statusMessage || "Resposta sem conteúdo reconhecível.", endpoint, httpStatus: response.status, externalRequestPerformed: true, checkedAt: new Date().toISOString() };
+  } catch (error) { return externalFailure(error, endpoint); }
 }
 
 async function validateNfseNational({ environment, configuration, certificate }) {
   const baseUrl = requireHttps(configuration.apiBaseUrl || NFSE_BASE_URLS[environment] || NFSE_BASE_URLS.homologation, "Base URL da SEFIN Nacional");
   const diagnosticDpsId = `DPS${"0".repeat(42)}`;
   const endpoint = `${baseUrl}/dps/${diagnosticDpsId}`;
-
   try {
-    const response = await requestMtls({
-      url: endpoint,
-      method: "GET",
-      pfx: certificate.pfx,
-      passphrase: certificate.passphrase,
-      headers: { accept: "application/json, application/xml, text/plain", "user-agent": "Seven-AutoERP/production" },
-    });
-
-    if (response.status === 401 || response.status === 403) {
-      return { ok: false, status: "external_auth_failed", blockers: [`A SEFIN Nacional recusou a autenticação do certificado (HTTP ${response.status}).`], message: safeExcerpt(response.rawBody) || "Certificado/credenciamento recusado pelo serviço externo.", endpoint, httpStatus: response.status, externalRequestPerformed: true, checkedAt: new Date().toISOString() };
-    }
-    if (response.status >= 500 || response.status === 0) {
-      return { ok: false, status: "external_unreachable", blockers: [`A SEFIN Nacional respondeu HTTP ${response.status || "sem status"}.`], message: safeExcerpt(response.rawBody) || response.statusMessage || "Serviço externo indisponível.", endpoint, httpStatus: response.status, externalRequestPerformed: true, checkedAt: new Date().toISOString() };
-    }
+    const response = await requestMtls({ url: endpoint, method: "GET", pfx: certificate.pfx, passphrase: certificate.passphrase, headers: { accept: "application/json, application/xml, text/plain", "user-agent": "Seven-AutoERP/production" } });
+    if (response.status === 401 || response.status === 403) return { ok: false, status: "external_auth_failed", blockers: [`A SEFIN Nacional recusou a autenticação do certificado (HTTP ${response.status}).`], message: safeExcerpt(response.rawBody) || "Certificado/credenciamento recusado pelo serviço externo.", endpoint, httpStatus: response.status, externalRequestPerformed: true, checkedAt: new Date().toISOString() };
+    if (response.status >= 500 || response.status === 0) return { ok: false, status: "external_unreachable", blockers: [`A SEFIN Nacional respondeu HTTP ${response.status || "sem status"}.`], message: safeExcerpt(response.rawBody) || response.statusMessage || "Serviço externo indisponível.", endpoint, httpStatus: response.status, externalRequestPerformed: true, checkedAt: new Date().toISOString() };
     return { ok: true, status: "external_connected", blockers: [], message: `SEFIN Nacional respondeu à consulta real de diagnóstico sem gravação (HTTP ${response.status}). A emissão só será marcada como autorizada após o POST oficial de DPS retornar a NFS-e.`, endpoint, httpStatus: response.status, externalRequestPerformed: true, checkedAt: new Date().toISOString() };
-  } catch (error) {
-    return externalFailure(error, endpoint);
-  }
+  } catch (error) { return externalFailure(error, endpoint); }
 }
 
 async function requestDfeDistribution({ environment, configuration = {}, company, certificate, lastNsu = "0" }) {
   const endpoint = requireHttps(configuration.apiBaseUrl || DFE_DISTRIBUTION_URLS[environment] || DFE_DISTRIBUTION_URLS.homologation, "URL do NFeDistribuicaoDFe");
-  const body = buildDfeDistributionEnvelope({
-    environment,
-    uf: configuration.uf || company?.state,
-    cnpj: configuration.cnpj || company?.taxId,
-    lastNsu,
-  });
+  const body = buildDfeDistributionEnvelope({ environment, uf: configuration.uf || company?.state, cnpj: configuration.cnpj || company?.taxId, lastNsu });
   try {
     const response = await requestMtls({
       url: endpoint,
       method: "POST",
       pfx: certificate.pfx,
       passphrase: certificate.passphrase,
-      headers: {
-        accept: "text/xml, application/xml",
-        "content-type": "text/xml; charset=utf-8",
-        soapaction: "http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/nfeDistDFeInteresse",
-        "user-agent": "Seven-AutoERP/production",
-      },
+      headers: { accept: "text/xml, application/xml", "content-type": "text/xml; charset=utf-8", soapaction: "http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/nfeDistDFeInteresse", "user-agent": "Seven-AutoERP/production" },
       body,
     });
     const cStat = extractXmlTag(response.rawBody, "cStat");
@@ -239,38 +179,20 @@ async function requestDfeDistribution({ environment, configuration = {}, company
       status: success ? (cStat === "138" ? "documents_received" : "no_documents") : (cStat === "656" ? "rate_limited" : "external_rejected"),
       blockers: success ? [] : [`Ambiente Nacional retornou cStat ${cStat || "não informado"}${xMotivo ? `: ${xMotivo}` : ""}.`],
       message: xMotivo || (success ? "Distribuição DF-e consultada com sucesso." : safeExcerpt(response.rawBody)),
-      endpoint,
-      httpStatus: response.status,
-      cStat,
-      xMotivo,
-      ultNSU,
-      maxNSU,
-      packages,
-      documents,
+      endpoint, httpStatus: response.status, cStat, xMotivo, ultNSU, maxNSU, packages, documents,
       retryAfterSeconds: cStat === "137" || cStat === "656" ? 3600 : 0,
       externalRequestPerformed: true,
       checkedAt: new Date().toISOString(),
     };
-  } catch (error) {
-    return externalFailure(error, endpoint);
-  }
+  } catch (error) { return externalFailure(error, endpoint); }
 }
 
 export async function validateFiscalIntegration({ connector, environment = "homologation", configuration = {}, company = null, certificate }) {
-  if (!certificate?.pfx) {
-    return { ok: false, status: "certificate_required", blockers: ["Certificado A1 não foi carregado do cofre local."], message: "Não é possível iniciar uma integração fiscal real sem o A1.", externalRequestPerformed: false, checkedAt: new Date().toISOString() };
-  }
+  if (!certificate?.pfx) return { ok: false, status: "certificate_required", blockers: ["Certificado A1 não foi carregado do cofre local."], message: "Não é possível iniciar uma integração fiscal real sem o A1.", externalRequestPerformed: false, checkedAt: new Date().toISOString() };
   if (connector === "nfe_sefaz") return validateNfeStatus({ environment, configuration, company, certificate });
   if (connector === "nfse_national") return validateNfseNational({ environment, configuration, company, certificate });
   if (connector === "nfe_distribution") {
-    return {
-      ok: false,
-      status: "ready_for_external_sync",
-      blockers: ["Use 'Sincronizar DF-e' para consultar o Ambiente Nacional. O botão de teste não consome NSU para evitar bloqueio por uso indevido."],
-      message: "Configuração pronta para sincronização real de DF-e, sem consulta automática no teste.",
-      externalRequestPerformed: false,
-      checkedAt: new Date().toISOString(),
-    };
+    return { ok: false, status: "ready_for_external_sync", blockers: ["Use 'Sincronizar DF-e' para consultar o Ambiente Nacional. O botão de teste não consome NSU para evitar bloqueio por uso indevido."], message: "Configuração pronta para sincronização real de DF-e, sem consulta automática no teste.", externalRequestPerformed: false, checkedAt: new Date().toISOString() };
   }
   return { ok: false, status: "implementation_required", blockers: [`O conector ${connector} ainda não possui operação externa implementada nesta etapa.`], message: "O ERP não marcará esta integração como ativa até existir uma chamada oficial real para o serviço correspondente.", externalRequestPerformed: false, checkedAt: new Date().toISOString() };
 }

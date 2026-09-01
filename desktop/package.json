@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite",
     "test:local-core": "node scripts/smoke-local-core.mjs",
-    "test:fiscal": "node --test tests/fiscal-integrations.test.mjs",
+    "test:fiscal": "node --test tests/*.test.mjs",
     "test:prebuild": "npm run test:local-core && npm run test:fiscal",
     "build:renderer": "vite build",
     "build:win": "npm run test:prebuild && npm run build:renderer && electron-builder --win nsis --x64",
@@ -19,8 +19,10 @@
     "start": "npm run test:prebuild && npm run build:renderer && electron ."
   },
   "dependencies": {
+    "node-forge": "1.4.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "xml-crypto": "6.1.2"
   },
   "devDependencies": {
     "@electron/notarize": "^3.1.0",
