@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   desktop-quality:
-    name: Desktop tests and renderer build
+    name: Desktop + .NET tests and renderer build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -23,6 +23,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
       - run: npm ci
       - run: npm run test:prebuild
+      - run: npm run test:dotnet
       - run: npm run build:renderer
