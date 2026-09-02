@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld("sevenDesktop", {
   dfeSync: (payload) => ipcRenderer.invoke("seven:dfe-sync", payload),
   dfeList: () => ipcRenderer.invoke("seven:dfe-list"),
   nfeDanfePdf: (draftId) => ipcRenderer.invoke("seven:nfe-danfe-pdf", draftId),
+  documentTemplates: (request) => ipcRenderer.invoke("seven:document-templates", request),
+  reportingStatus: () => ipcRenderer.invoke("seven:reporting-status"),
+  documentRenderPdf: (payload) => ipcRenderer.invoke("seven:document-render-pdf", payload),
+  fiscalZeus: (command, payload) => ipcRenderer.invoke("seven:fiscal-zeus", command, payload),
+  danfeZeusPdf: (payload) => ipcRenderer.invoke("seven:danfe-zeus-pdf", payload),
   onStatus: (callback) => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on("seven:status", listener);
