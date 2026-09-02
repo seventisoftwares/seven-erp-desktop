@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import SevenErpApp from "./seven-erp-app";
 import ServiceOrdersModuleV6 from "./service-orders-module-v6";
 import OsTemplateDesigner from "./os-template-designer";
-import ProductsModule from "./products-module";
+import ProductsModuleV2 from "./products-module-v2";
 import IntegrationsModuleV7 from "./integrations-module-v7";
 import DfeReceivedModule from "./dfe-received-module";
 import MeshDevicesModule from "./mesh-devices-module";
@@ -16,6 +16,7 @@ import "./erp-enhancements.css";
 import "./erp-professional.css";
 import "./os-studio.css";
 import "./catalog-studio.css";
+import "./catalog-vehicle.css";
 import "./nfe-mirror.css";
 import "./nfe-sefaz-mirror.css";
 import "./nfe-classic.css";
@@ -66,11 +67,11 @@ export default function SevenErpShell() {
     {enhancedModule && <div className={`seven-enhancement-overlay ${theme}`}>
       {enhancedModule === "service" ? <ServiceOrdersModuleV6 onClose={() => setEnhancedModule(null)} onOpenDesigner={() => setEnhancedModule("osDesigner")} onOpenCatalog={() => setEnhancedModule("catalog")} />
         : enhancedModule === "osDesigner" ? <OsTemplateDesigner onClose={() => setEnhancedModule("service")} />
-        : enhancedModule === "catalog" ? <ProductsModule onClose={() => setEnhancedModule(null)} />
+        : enhancedModule === "catalog" ? <ProductsModuleV2 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "company" ? <CompanyModule onClose={() => setEnhancedModule(null)} />
-        : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor Clássico NF-e · v1.0.3</strong><span>Modelo 55 · DANFE Seven redesenhada do zero · paginação A4 real · Build DANFE-SEVEN-ZERO</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeClassicModule /></div>
+        : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor Clássico NF-e · v1.0.4</strong><span>Modelo 55 · DANFE Seven · catálogo com veículos por chassi · Build DEALERSHIP-VEHICLES</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeClassicModule /></div>
         : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
     </div>}
   </div>;
