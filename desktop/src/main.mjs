@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -11,6 +11,7 @@ import { createSecretVault } from "./secret-vault.mjs";
 import { createFiscalDocumentStore } from "./fiscal-document-store.mjs";
 import { createNfeSequenceStore } from "./nfe-sequence-store.mjs";
 import { createNfeService } from "./nfe-service.mjs";
+import { buildDanfeHtml } from "./nfe-danfe.mjs";
 import { createErpServices } from "./erp-services.mjs";
 
 const APP_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -203,6 +204,36 @@ async function requestLocal(apiPath, options = {}) {
   return result;
 }
 
+async function saveDanfePdf(draftId) {
+  const listResult = await nfeService.listDrafts();
+  let data = {};
+  try { data = JSON.parse(listResult.body || "{}"); } catch {}
+  const draft = (data.drafts || []).find((item) => item.id === String(draftId || ""));
+  if (!draft) throw new Error("NF-e não encontrada para geração do DANFE.");
+  if (!["authorized", "cancelled"].includes(String(draft.transmissionStatus || draft.transmission?.status))) throw new Error("O DANFE só pode ser gerado após autorização da NF-e.");
+  const accessKey = String(draft.accessKey || draft.transmission?.accessKey || "");
+  if (!accessKey) throw new Error("NF-e autorizada sem chave de acesso local.");
+  const nfeProcXml = await fiscalDocumentStore.readIssued(accessKey, "authorized");
+  const cancelled = String(draft.transmissionStatus || draft.transmission?.status) === "cancelled";
+  const html = buildDanfeHtml({ nfeProcXml, cancelled, cancellationProtocol: draft.cancellation?.protocol || draft.transmission?.cancellation?.protocol || "" });
+  const printWindow = new BrowserWindow({ show: false, width: 900, height: 1200, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true } });
+  try {
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    const pdf = await printWindow.webContents.printToPDF({ printBackground: true, pageSize: "A4", preferCSSPageSize: true });
+    const safeNumber = String(draft.nfeNumber || draft.transmission?.number || "NF-e").replace(/[^0-9A-Za-z_-]/g, "-");
+    const save = await dialog.showSaveDialog(mainWindow || undefined, {
+      title: "Salvar DANFE",
+      defaultPath: path.join(app.getPath("documents"), `DANFE-NFe-${safeNumber}.pdf`),
+      filters: [{ name: "Documento PDF", extensions: ["pdf"] }],
+    });
+    if (save.canceled || !save.filePath) return { saved: false, canceled: true };
+    await writeFile(save.filePath, pdf, { mode: 0o600 });
+    return { saved: true, canceled: false, filePath: save.filePath, bytes: pdf.length, accessKey };
+  } finally {
+    if (!printWindow.isDestroyed()) printWindow.destroy();
+  }
+}
+
 async function pairDevice(payload = {}) {
   await setDeviceName(payload.deviceName);
   const result = await mesh.pairWithCode({ code: payload.code, deviceName: await getDeviceName(), address: payload.address || "" });
@@ -283,6 +314,7 @@ else {
     ipcMain.handle("seven:integration-test", (_event, payload) => erpServices.testIntegration(payload));
     ipcMain.handle("seven:dfe-sync", (_event, payload) => erpServices.syncDfe(payload));
     ipcMain.handle("seven:dfe-list", () => erpServices.listReceivedDfe());
+    ipcMain.handle("seven:nfe-danfe-pdf", (_event, draftId) => saveDanfePdf(draftId));
 
     createWindow();
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
