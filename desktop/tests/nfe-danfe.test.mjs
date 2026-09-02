@@ -49,26 +49,36 @@ test("Code 128 encoder supports numeric/alphanumeric NF-e keys and produces SVG 
   assert.match(svg, /<rect /);
 });
 
-test("DANFE clássico traz blocos tradicionais do modelo 55", () => {
+test("DANFE Seven traz a estrutura fiscal convencional do modelo 55", () => {
   const data = extractClassicData(NFE_PROC);
   assert.equal(data.operationType, "1 - SAÍDA");
   assert.equal(data.transport.mode, "9");
   const html = buildDanfeHtml({ nfeProcXml: NFE_PROC });
-  assert.match(html, /RECEBEMOS DE/);
+  assert.match(html, /RECEBEMOS DE/i);
   assert.match(html, /DANFE/);
-  assert.match(html, /Chave de acesso/);
-  assert.match(html, /Destinatário \/ Remetente/);
-  assert.match(html, /Cálculo do imposto/);
-  assert.match(html, /Transportador \/ Volumes transportados/);
-  assert.match(html, /Dados dos produtos \/ serviços/);
+  assert.match(html, /chave de acesso/i);
+  assert.match(html, /destinatário \/ remetente/i);
+  assert.match(html, /cálculo do imposto/i);
+  assert.match(html, /transportador \/ volumes transportados/i);
+  assert.match(html, /dados dos produtos \/ serviços/i);
   assert.match(html, /SEM VALOR FISCAL/);
   assert.match(html, /AMBIENTE DE HOMOLOGAÇÃO/);
   assert.match(html, /143260000000001/);
   assert.match(html, /CLIENTE TESTE &amp; CIA/);
+  assert.match(html, /danfe-page/);
 });
 
-test("DANFE clássico marca cancelamento e protocolo do evento", () => {
+test("DANFE Seven marca cancelamento e protocolo do evento", () => {
   const cancelled = buildDanfeHtml({ nfeProcXml: NFE_PROC, cancelled: true, cancellationProtocol: "143260000000099" });
   assert.match(cancelled, /CANCELADA/);
   assert.match(cancelled, /Protocolo do evento: 143260000000099/);
+});
+
+test("DANFE Seven pagina automaticamente notas com muitos itens", () => {
+  const extraItems = Array.from({ length: 34 }, (_, index) => `<det nItem="${index + 2}"><prod><cProd>P${String(index + 2).padStart(3, "0")}</cProd><xProd>Produto adicional ${index + 2} com descrição suficiente para validar quebra de linha e paginação controlada</xProd><NCM>84713012</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>10.00</vProd></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS></imposto></det>`).join("");
+  const manyItemsXml = NFE_PROC.replace("    <total><ICMSTot>", `${extraItems}\n    <total><ICMSTot>`);
+  const html = buildDanfeHtml({ nfeProcXml: manyItemsXml });
+  assert.match(html, /Folha 1\/\d+/);
+  assert.match(html, /Folha 2\/\d+/);
+  assert.match(html, /Continuação dos produtos \/ serviços/);
 });
