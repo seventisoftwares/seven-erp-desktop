@@ -67,16 +67,20 @@ public sealed class PadraoNacionalProvider(HttpClient httpClient) : INfseProvide
 
     private async Task<FiscalOperationResult> SendAsync(NfseConfiguration configuration, HttpMethod method, string relativePath, object? payload, CancellationToken cancellationToken)
     {
-        if (!Uri.TryCreate(configuration.BaseUrl, UriKind.Absolute, out var baseUri))
-            return new FiscalOperationResult { Success = false, Status = "configuration_error", Message = "Configure a URL oficial do ambiente NFS-e Padrão Nacional antes de transmitir." };
+        if (!Uri.TryCreate(configuration.BaseUrl, UriKind.Absolute, out var baseUri) || baseUri.Scheme != Uri.UriSchemeHttps)
+            return new FiscalOperationResult { Success = false, Status = "configuration_error", Message = "Configure a URL HTTPS oficial do ambiente NFS-e Padrão Nacional antes de transmitir." };
         using var request = new HttpRequestMessage(method, new Uri(baseUri, relativePath));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         if (!string.IsNullOrWhiteSpace(configuration.BearerToken)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", configuration.BearerToken);
         if (payload is not null) request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        JsonElement? raw = null; try { raw = JsonSerializer.Deserialize<JsonElement>(body); } catch { }
-        return new FiscalOperationResult { Success = response.IsSuccessStatusCode, Status = response.IsSuccessStatusCode ? "accepted" : "rejected", Code = ((int)response.StatusCode).ToString(), Message = response.ReasonPhrase, Raw = raw };
+        try
+        {
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            JsonElement? raw = null; try { raw = JsonSerializer.Deserialize<JsonElement>(body); } catch { raw = JsonSerializer.SerializeToElement(new { body }); }
+            return new FiscalOperationResult { Success = response.IsSuccessStatusCode, Status = response.IsSuccessStatusCode ? "accepted" : "rejected", Code = ((int)response.StatusCode).ToString(), Message = response.ReasonPhrase, Raw = raw };
+        }
+        catch (Exception ex) { return new FiscalOperationResult { Success = false, Status = "communication_error", Message = SecretRedaction.Redact(ex.Message) }; }
     }
 }
 
@@ -92,14 +96,31 @@ public sealed class MunicipalProvider : INfseProvider
 public sealed class AcbrProvider : INfseProvider
 {
     public string Name => "acbr";
-    public Task<FiscalOperationResult> IssueAsync(NfseConfiguration configuration, NfseRequest request, CancellationToken cancellationToken = default) => ExecuteGuard(configuration);
-    public Task<FiscalOperationResult> QueryAsync(NfseConfiguration configuration, string key, CancellationToken cancellationToken = default) => ExecuteGuard(configuration);
-    public Task<FiscalOperationResult> CancelAsync(NfseConfiguration configuration, string key, string justification, CancellationToken cancellationToken = default) => ExecuteGuard(configuration);
 
-    private static Task<FiscalOperationResult> ExecuteGuard(NfseConfiguration configuration)
+    public Task<FiscalOperationResult> IssueAsync(NfseConfiguration configuration, NfseRequest request, CancellationToken cancellationToken = default)
+        => Execute(configuration, adapter => adapter.Issue(configuration, request), cancellationToken);
+
+    public Task<FiscalOperationResult> QueryAsync(NfseConfiguration configuration, string key, CancellationToken cancellationToken = default)
+        => Execute(configuration, adapter => adapter.Query(key), cancellationToken);
+
+    public Task<FiscalOperationResult> CancelAsync(NfseConfiguration configuration, string key, string justification, CancellationToken cancellationToken = default)
+        => Execute(configuration, adapter => adapter.Cancel(key, justification), cancellationToken);
+
+    private static Task<FiscalOperationResult> Execute(NfseConfiguration configuration, Func<AcbrNativeAdapter, FiscalOperationResult> action, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(configuration.AcbrLibPath) || !File.Exists(configuration.AcbrLibPath))
-            return Task.FromResult(new FiscalOperationResult { Success = false, Status = "acbrlib_not_configured", Message = "ACBrLib não encontrada. Compile-a dos fontes open source e configure o caminho da biblioteca." });
-        return Task.FromResult(new FiscalOperationResult { Success = false, Status = "acbrlib_adapter_pending_runtime_binding", Message = "ACBrLib localizada, porém o binding nativo deve ser validado para a versão compilada antes da primeira transmissão. O ERP falha fechado e não simula emissão." });
+            return Task.FromResult(new FiscalOperationResult { Success = false, Status = "acbrlib_not_configured", Message = "ACBrLibNFSe não encontrada. Compile-a dos fontes open source e configure o caminho da biblioteca MT CDECL 64-bit." });
+        try
+        {
+            using var adapter = new AcbrNativeAdapter(configuration.AcbrLibPath);
+            adapter.Initialize(configuration);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(action(adapter));
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult(new FiscalOperationResult { Success = false, Status = "acbrlib_error", Message = SecretRedaction.Redact(ex.Message) });
+        }
     }
 }
