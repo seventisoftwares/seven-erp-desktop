@@ -13,6 +13,15 @@ export type CatalogItem = {
   stockQuantityMilli: number;
   minimumStockMilli: number;
   status: "active" | "inactive";
+  gtin?: string;
+  origin?: string;
+  defaultCfop?: string;
+  cst?: string;
+  csosn?: string;
+  pisCst?: string;
+  cofinsCst?: string;
+  ibsCbsCst?: string;
+  cClassTrib?: string;
   createdAt: string;
   updatedAt: string;
 };
