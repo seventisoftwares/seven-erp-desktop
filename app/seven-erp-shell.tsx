@@ -31,9 +31,6 @@ export default function SevenErpShell() {
       const button = target?.closest("button");
       if (!button) return;
 
-      // Botões dentro dos módulos aprimorados pertencem ao próprio módulo.
-      // Antes desta proteção, o submit "Abrir Ordem de Serviço" era capturado
-      // pelo roteador global e o formulário nunca era enviado.
       if (button.closest(".seven-enhancement-overlay")) return;
 
       const label = (button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -72,7 +69,7 @@ export default function SevenErpShell() {
         : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "company" ? <CompanyModule onClose={() => setEnhancedModule(null)} />
-        : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor Clássico NF-e</strong><span>Modelo 55 · clientes e produtos cadastrados · DANFE clássico</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeClassicModule /></div>
+        : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor Clássico NF-e · v1.0.1</strong><span>Modelo 55 · clientes e produtos cadastrados · DANFE clássico · Build NFE-CLASSIC-REAL</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeClassicModule /></div>
         : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
     </div>}
   </div>;
