@@ -23,6 +23,7 @@ import "./nfe-mirror.css";
 import "./nfe-sefaz-mirror.css";
 import "./nfe-danfe-preview-v3.css";
 import "./nfe-danfe-reference-preview.css";
+import "./nfe-danfe-reference-fit.css";
 import "./nfe-classic.css";
 import "./nfe-classic-route.css";
 import "./os-preview.css";
