@@ -70,7 +70,7 @@ export default function SevenErpShell() {
         : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "company" ? <CompanyModule onClose={() => setEnhancedModule(null)} />
-        : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor Clássico NF-e · v1.0.2</strong><span>Modelo 55 · Espelho padrão DANFE convencional · DANFE autorizado via XML · Build NFE-SEFAZ-CONVENCIONAL</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeClassicModule /></div>
+        : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor Clássico NF-e · v1.0.3</strong><span>Modelo 55 · DANFE Seven redesenhada do zero · paginação A4 real · Build DANFE-SEVEN-ZERO</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeClassicModule /></div>
         : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
     </div>}
   </div>;
