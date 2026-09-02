@@ -56,16 +56,23 @@ async function fiscalZeusCommand(command, payload = {}) {
   const certificateId = String(cloned.certificateId || cloned.configuration?.certificateId || "").trim();
   delete cloned.certificateId;
   if (cloned.configuration) delete cloned.configuration.certificateId;
-  if (needsCertificate) {
-    if (!certificateId) throw new Error("Selecione um certificado digital para esta operação fiscal.");
-    if (!safeStorage.isEncryptionAvailable()) throw new Error("Cofre seguro do sistema operacional indisponível.");
-    if (!certificateVault) certificateVault = createCertificateVault({ dataDir: app.getPath("userData"), readJson, writeJson });
-    const secret = await certificateVault.loadSecret(certificateId);
-    cloned.configuration = { ...(cloned.configuration || {}), certificate: { pfxBase64: secret.pfx.toString("base64"), passphrase: secret.passphrase || "", vaultReference: certificateId } };
-    try { return await sidecar.invoke(command, cloned, { timeoutMs: 180000 }); }
-    finally { try { secret.pfx.fill(0); } catch {} if (cloned.configuration?.certificate) { cloned.configuration.certificate.pfxBase64 = ""; cloned.configuration.certificate.passphrase = ""; } }
+  if (!needsCertificate) return sidecar.invoke(command, cloned, { timeoutMs: 180000 });
+
+  if (!certificateId) throw new Error("Selecione um certificado digital para esta operação fiscal.");
+  if (!safeStorage.isEncryptionAvailable()) throw new Error("Cofre seguro do sistema operacional indisponível.");
+  if (!certificateVault) certificateVault = createCertificateVault({ dataDir: app.getPath("userData"), readJson, writeJson });
+  const secret = await certificateVault.loadSecret(certificateId);
+  const certificate = { pfxBase64: secret.pfx.toString("base64"), passphrase: secret.passphrase || "", vaultReference: certificateId };
+  const isStatusCommand = command === "nfe.status" || command === "nfce.status";
+  if (isStatusCommand) cloned.certificate = certificate;
+  else cloned.configuration = { ...(cloned.configuration || {}), certificate };
+  try { return await sidecar.invoke(command, cloned, { timeoutMs: 180000 }); }
+  finally {
+    try { secret.pfx.fill(0); } catch {}
+    certificate.pfxBase64 = ""; certificate.passphrase = "";
+    if (cloned.certificate) { cloned.certificate.pfxBase64 = ""; cloned.certificate.passphrase = ""; }
+    if (cloned.configuration?.certificate) { cloned.configuration.certificate.pfxBase64 = ""; cloned.configuration.certificate.passphrase = ""; }
   }
-  return sidecar.invoke(command, cloned, { timeoutMs: 180000 });
 }
 
 async function danfeZeusPdf(event, payload = {}) {
