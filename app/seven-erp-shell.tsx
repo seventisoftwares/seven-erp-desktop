@@ -17,6 +17,7 @@ import "./os-studio.css";
 import "./catalog-studio.css";
 import "./nfe-mirror.css";
 import "./nfe-classic.css";
+import "./nfe-classic-route.css";
 import "./os-preview.css";
 
 type EnhancedModule = "service" | "osDesigner" | "catalog" | "integrations" | "dfe" | "devices" | "company" | "nfe" | null;
