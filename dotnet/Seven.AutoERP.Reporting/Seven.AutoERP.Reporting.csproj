@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Seven.AutoERP.Contracts\Seven.AutoERP.Contracts.csproj" />
+    <PackageReference Include="Majorsilence.Reporting.RdlCreator.SkiaSharp" Version="26.0.3" />
+    <PackageReference Include="Majorsilence.Reporting.RdlEngine.SkiaSharp" Version="26.0.3" />
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="ZXing.Net" Version="0.16.11" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
+  </ItemGroup>
+</Project>
