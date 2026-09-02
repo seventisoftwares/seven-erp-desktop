@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("sevenDesktop", {
   integrationTest: (payload) => ipcRenderer.invoke("seven:integration-test", payload),
   dfeSync: (payload) => ipcRenderer.invoke("seven:dfe-sync", payload),
   dfeList: () => ipcRenderer.invoke("seven:dfe-list"),
+  nfeDanfePdf: (draftId) => ipcRenderer.invoke("seven:nfe-danfe-pdf", draftId),
   onStatus: (callback) => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on("seven:status", listener);
