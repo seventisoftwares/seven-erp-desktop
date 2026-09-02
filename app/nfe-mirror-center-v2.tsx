@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import NfeDanfePreviewV3 from "./nfe-danfe-preview-v3";
+import NfeDanfeReferencePreview from "./nfe-danfe-reference-preview";
 
 type AnyRow = Record<string, any>;
 type SnapshotMap = Record<string, { payload: AnyRow; savedAt: string }>;
@@ -60,9 +60,9 @@ export default function NfeMirrorCenterV2() {
 
   return <>{launcher}{open && <div className="nfe-mirror-overlay sefaz-mirror-mode" role="dialog" aria-modal="true" aria-label="Espelho da NF-e">
     <div className="nfe-mirror-topbar no-print">
-      <div><span>SEVEN ERP 1.0.5 · FISCAL</span><h2>Espelho individual NF-e · renderer novo</h2><p>Preview A4 criado do zero. Não preenche tributos inexistentes com valores falsos e usa Code 128 real quando a chave existe.</p></div>
+      <div><span>SEVEN ERP 1.0.6 · FISCAL</span><h2>Espelho NF-e · modelo convencional</h2><p>Layout A4 reconstruído no padrão do modelo de referência. Código de barras real quando existir chave e dados fiscais sem preenchimento inventado.</p></div>
       <div className="nfe-mirror-controls"><label><span>Documento</span><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Selecione...</option>{drafts.map((draft) => <option key={draft.id} value={draft.id}>{draft.nfeNumber ? `NF-e ${String(draft.nfeNumber).padStart(9,"0")}` : "Rascunho"} · {draft.recipientName || "Sem destinatário"} · {draft.totalCents !== undefined ? centsMoney(draft.totalCents) : ""}</option>)}</select></label><button onClick={() => window.print()} disabled={!selected}>Imprimir / Salvar PDF do espelho</button><button className="mirror-close" onClick={() => setOpen(false)}>Fechar</button></div>
     </div>
-    <div className="nfe-mirror-stage">{error ? <div className="mirror-empty-state"><b>Não foi possível abrir o espelho</b><span>{error}</span></div> : loading ? <div className="mirror-empty-state"><b>Carregando...</b><span>Montando a folha A4.</span></div> : !selected ? <div className="mirror-empty-state"><b>Nenhuma NF-e disponível</b><span>Salve uma NF-e para visualizar.</span></div> : <><div className="mirror-snapshot-note no-print"><b>Renderer NF-e v3</b><span>{snapshot ? "Dados detalhados recuperados do snapshot individual desta NF-e." : "Campos sem dado persistido ficam em branco; o sistema não inventa tributos."}</span></div><NfeDanfePreviewV3 draft={selected} company={company} snapshot={snapshot} /></>}</div>
+    <div className="nfe-mirror-stage">{error ? <div className="mirror-empty-state"><b>Não foi possível abrir o espelho</b><span>{error}</span></div> : loading ? <div className="mirror-empty-state"><b>Carregando...</b><span>Montando a folha A4.</span></div> : !selected ? <div className="mirror-empty-state"><b>Nenhuma NF-e disponível</b><span>Salve uma NF-e para visualizar.</span></div> : <><div className="mirror-snapshot-note no-print"><b>Modelo DANFE 1.0.6</b><span>{snapshot ? "Dados detalhados recuperados do snapshot individual desta NF-e." : "Campos sem dado persistido ficam em branco; o sistema não inventa informações fiscais."}</span></div><NfeDanfeReferencePreview draft={selected} company={company} snapshot={snapshot} /></>}</div>
   </div>}</>;
 }
