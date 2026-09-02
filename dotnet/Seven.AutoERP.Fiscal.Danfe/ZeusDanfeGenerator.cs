@@ -1,9 +1,10 @@
 using DFe.Classes.Flags;
-using NFe.Classes;
-using NFe.Danfe.Html;
-using NFe.Danfe.Html.Dominio;
-using NFe.Danfe.Html.Interfaces;
-using NFe.Utils.NFe;
+using global::NFe.Classes;
+using global::NFe.Danfe.Html;
+using global::NFe.Danfe.Html.CrossCutting;
+using global::NFe.Danfe.Html.Dominio;
+using global::NFe.Danfe.Html.Interfaces;
+using global::NFe.Utils.NFe;
 
 namespace Seven.AutoERP.Fiscal.Danfe;
 
@@ -19,8 +20,7 @@ public sealed class ZeusDanfeGenerator
         if (protocol is null || protocol.cStat != 100 || string.IsNullOrWhiteSpace(protocol.nProt))
             throw new InvalidOperationException("DANFE só pode ser gerado para NF-e autorizada (cStat 100).");
         cancellationToken.ThrowIfCancellationRequested();
-        var danfe = new DanfeNFe(proc.NFe, Status.Autorizada, protocol.nProt, "Seven ERP");
-        if (!string.IsNullOrWhiteSpace(logoDataUrl)) danfe.Emitente.Logo = logoDataUrl;
+        var danfe = new DanfeNFe(proc.NFe, Status.Autorizada, protocol.nProt, "Seven ERP", null, logoDataUrl ?? "");
         IDanfeHtml2 renderer = new DanfeNfeHtml2(danfe);
         var document = await renderer.ObterDocHtmlAsync();
         if (string.IsNullOrWhiteSpace(document.Html)) throw new InvalidOperationException("O gerador Zeus retornou DANFE vazio.");
