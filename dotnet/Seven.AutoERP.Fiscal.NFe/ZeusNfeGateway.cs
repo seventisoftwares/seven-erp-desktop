@@ -2,13 +2,14 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using DFe.Classes.Entidades;
 using DFe.Classes.Flags;
-using NFe.Classes.Informacoes.Identificacao.Tipos;
-using NFe.Classes.Servicos.Tipos;
-using NFe.Servicos;
-using NFe.Utils;
-using NFe.Utils.NFe;
-using NFe.Utils.Recepcao;
+using global::NFe.Classes.Informacoes.Identificacao.Tipos;
+using global::NFe.Classes.Servicos.Tipos;
+using global::NFe.Servicos;
+using global::NFe.Utils;
+using global::NFe.Utils.NFe;
+using global::NFe.Utils.Recepcao;
 using Seven.AutoERP.Fiscal;
+using ZeusNFeDocument = global::NFe.Classes.NFe;
 
 namespace Seven.AutoERP.Fiscal.NFe;
 
@@ -21,7 +22,7 @@ public sealed class ZeusNfeGateway
         models = new[] { "55", "65" },
         operations = new[] { "load_xml", "schema_validate", "sign_a1", "status_service", "authorize_sync" },
         a3 = "supported_when_os_certificate_store/provider_is_available",
-        note = "Eventos continuam disponíveis no motor fiscal atual até a migração Zeus ser validada em homologação real."
+        note = "O motor Node existente permanece disponível para eventos enquanto cada operação Zeus é validada em homologação real."
     };
 
     public FiscalOperationResult ValidateXml(string xml, NfeRuntimeConfiguration configuration)
@@ -29,7 +30,7 @@ public sealed class ZeusNfeGateway
         try
         {
             var config = BuildConfiguration(configuration);
-            var nfe = new NFe.Classes.NFe().CarregarDeXmlString(xml);
+            var nfe = new ZeusNFeDocument().CarregarDeXmlString(xml);
             nfe.Valida(config);
             return new FiscalOperationResult
             {
@@ -40,10 +41,7 @@ public sealed class ZeusNfeGateway
                 AccessKey = nfe.infNFe?.Id?.Replace("NFe", "", StringComparison.OrdinalIgnoreCase)
             };
         }
-        catch (Exception ex)
-        {
-            return Failure("schema_validation_failed", ex);
-        }
+        catch (Exception ex) { return Failure("schema_validation_failed", ex); }
     }
 
     public FiscalOperationResult SignAndValidateXml(string xml, NfeRuntimeConfiguration configuration)
@@ -52,7 +50,7 @@ public sealed class ZeusNfeGateway
         {
             using var cert = LoadA1(configuration.Certificate);
             var config = BuildConfiguration(configuration);
-            var nfe = new NFe.Classes.NFe().CarregarDeXmlString(xml);
+            var nfe = new ZeusNFeDocument().CarregarDeXmlString(xml);
             nfe.Assina(config, cert);
             nfe.Valida(config);
             var signedXml = nfe.ObterXmlString();
@@ -65,10 +63,7 @@ public sealed class ZeusNfeGateway
                 AccessKey = nfe.infNFe?.Id?.Replace("NFe", "", StringComparison.OrdinalIgnoreCase)
             };
         }
-        catch (Exception ex)
-        {
-            return Failure("sign_or_validate_failed", ex);
-        }
+        catch (Exception ex) { return Failure("sign_or_validate_failed", ex); }
     }
 
     public FiscalOperationResult StatusService(NfeRuntimeConfiguration configuration)
@@ -89,10 +84,7 @@ public sealed class ZeusNfeGateway
                 Raw = JsonSerializer.SerializeToElement(new { response.Retorno.cStat, response.Retorno.xMotivo, response.Retorno.tpAmb, response.Retorno.cUF, response.Retorno.dhRecbto })
             };
         }
-        catch (Exception ex)
-        {
-            return Failure("status_service_failed", ex);
-        }
+        catch (Exception ex) { return Failure("status_service_failed", ex); }
     }
 
     public FiscalOperationResult AuthorizeSync(string xml, NfeRuntimeConfiguration configuration, int batchId)
@@ -102,40 +94,36 @@ public sealed class ZeusNfeGateway
             if (batchId <= 0) throw new InvalidOperationException("Identificador de lote deve ser positivo.");
             using var cert = LoadA1(configuration.Certificate);
             var config = BuildConfiguration(configuration);
-            var nfe = new NFe.Classes.NFe().CarregarDeXmlString(xml);
+            var nfe = new ZeusNFeDocument().CarregarDeXmlString(xml);
             nfe.Assina(config, cert);
             nfe.Valida(config);
             using var service = new ServicosNFe(config, cert);
-            var response = service.NFeAutorizacao(batchId, IndicadorSincronizacao.Sincrono, new List<NFe.Classes.NFe> { nfe }, false);
+            var response = service.NFeAutorizacao(batchId, IndicadorSincronizacao.Sincrono, new List<ZeusNFeDocument> { nfe }, false);
             var ret = response.Retorno;
             var protocol = ret.protNFe?.infProt;
             var code = protocol?.cStat ?? ret.cStat;
             var motive = protocol?.xMotivo ?? ret.xMotivo;
             var accessKey = protocol?.chNFe ?? nfe.infNFe?.Id?.Replace("NFe", "", StringComparison.OrdinalIgnoreCase);
             var authorized = code == 100;
-            // O XML protocolado (nfeProc) continua sendo montado/persistido pelo motor fiscal existente até a etapa de homologação Zeus.
             return new FiscalOperationResult
             {
                 Success = authorized,
                 Status = authorized ? "authorized" : "rejected",
                 Code = code.ToString(),
                 Message = motive,
-                Xml = response.Retorno.ObterXmlString(),
+                Xml = ret.ObterXmlString(),
                 Protocol = protocol?.nProt,
                 AccessKey = accessKey,
                 Raw = JsonSerializer.SerializeToElement(new { ret.cStat, ret.xMotivo, protocol = protocol is null ? null : new { protocol.cStat, protocol.xMotivo, protocol.nProt, protocol.chNFe, protocol.dhRecbto } })
             };
         }
-        catch (Exception ex)
-        {
-            return Failure("authorization_failed", ex);
-        }
+        catch (Exception ex) { return Failure("authorization_failed", ex); }
     }
 
     private static ConfiguracaoServico BuildConfiguration(NfeRuntimeConfiguration input)
     {
         if (!Enum.TryParse<Estado>(input.Company.State, true, out var state)) throw new InvalidOperationException($"UF inválida: {input.Company.State}");
-        var config = new ConfiguracaoServico
+        return new ConfiguracaoServico
         {
             cUF = state,
             tpAmb = input.Environment == FiscalEnvironment.Production ? TipoAmbiente.Producao : TipoAmbiente.Homologacao,
@@ -145,7 +133,6 @@ public sealed class ZeusNfeGateway
             TimeOut = Math.Clamp(input.TimeoutMilliseconds, 5000, 180000),
             DefineVersaoServicosAutomaticamente = true,
         };
-        return config;
     }
 
     private static X509Certificate2 LoadA1(FiscalCertificateInput? certificate)
