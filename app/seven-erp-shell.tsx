@@ -15,6 +15,7 @@ import "./erp-professional.css";
 import "./os-studio.css";
 import "./catalog-studio.css";
 import "./nfe-mirror.css";
+import "./nfe-classic.css";
 
 type EnhancedModule = "service" | "osDesigner" | "catalog" | "integrations" | "dfe" | "devices" | "company" | null;
 
