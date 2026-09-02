@@ -9,7 +9,7 @@ import IntegrationsModuleV7 from "./integrations-module-v7";
 import DfeReceivedModule from "./dfe-received-module";
 import MeshDevicesModule from "./mesh-devices-module";
 import CompanyModule from "./company-module";
-import NfeMirrorCenter from "./nfe-mirror-center";
+import NfeMirrorCenter from "./nfe-mirror-center-v2";
 import NfeIndividualMirrorActions from "./nfe-individual-mirror-actions";
 import NfeClassicModule from "./nfe-classic-module";
 import "./erp-enhancements.css";
@@ -17,6 +17,7 @@ import "./erp-professional.css";
 import "./os-studio.css";
 import "./catalog-studio.css";
 import "./nfe-mirror.css";
+import "./nfe-sefaz-mirror.css";
 import "./nfe-classic.css";
 import "./nfe-classic-route.css";
 import "./os-preview.css";
@@ -31,9 +32,7 @@ export default function SevenErpShell() {
       const target = event.target as HTMLElement | null;
       const button = target?.closest("button");
       if (!button) return;
-
       if (button.closest(".seven-enhancement-overlay")) return;
-
       const label = (button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
       if (label.includes("emissão de nf-e") || label.includes("emissao de nf-e")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("nfe"); return; }
       if (label.includes("integrações e ajustes")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("integrations"); return; }
@@ -71,7 +70,7 @@ export default function SevenErpShell() {
         : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "company" ? <CompanyModule onClose={() => setEnhancedModule(null)} />
-        : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor Clássico NF-e · v1.0.1</strong><span>Modelo 55 · clientes e produtos cadastrados · DANFE clássico · Build NFE-CLASSIC-REAL</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeClassicModule /></div>
+        : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor Clássico NF-e · v1.0.2</strong><span>Modelo 55 · Espelho padrão DANFE convencional · DANFE autorizado via XML · Build NFE-SEFAZ-CONVENCIONAL</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeClassicModule /></div>
         : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
     </div>}
   </div>;
