@@ -3,6 +3,8 @@ import path from "node:path";
 import { buildNfeXml, validateCnpj, validateNfeDraft } from "./nfe-xml.mjs";
 import { signNfeXml } from "./nfe-signature.mjs";
 import { authorizeNfe, consultAuthorizationReceipt, consultNfeProtocol } from "./nfe-authorizer.mjs";
+import { cancelNfe, inutilizeNfeNumbers } from "./nfe-events.mjs";
+import { UF_CODES } from "./fiscal-integrations.mjs";
 
 const text = (value) => String(value ?? "").trim();
 const digits = (value) => String(value ?? "").replace(/\D/g, "");
@@ -14,37 +16,26 @@ const RS_ENDPOINTS = Object.freeze({
     returnAuthorizationServiceUrl: "https://nfe-homologacao.sefazrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx",
     consultationServiceUrl: "https://nfe-homologacao.sefazrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx",
     statusServiceUrl: "https://nfe-homologacao.sefazrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx",
+    eventServiceUrl: "https://nfe-homologacao.sefazrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx",
+    inutilizationServiceUrl: "https://nfe-homologacao.sefazrs.rs.gov.br/ws/nfeinutilizacao/nfeinutilizacao4.asmx",
   }),
   production: Object.freeze({
     authorizationServiceUrl: "https://nfe.sefazrs.rs.gov.br/ws/NfeAutorizacao/NFeAutorizacao4.asmx",
     returnAuthorizationServiceUrl: "https://nfe.sefazrs.rs.gov.br/ws/NfeRetAutorizacao/NFeRetAutorizacao4.asmx",
     consultationServiceUrl: "https://nfe.sefazrs.rs.gov.br/ws/NfeConsulta/NfeConsulta4.asmx",
-    statusServiceUrl: "https://nfe.sefazrs.rs.gov.br/ws/NfeStatusServico/NFeStatusServico4.asmx",
+    statusServiceUrl: "https://nfe.sefazrs.rs.gov.br/ws/NfeStatusServico/NfeStatusServico4.asmx",
+    eventServiceUrl: "https://nfe.sefazrs.rs.gov.br/ws/recepcaoevento/recepcaoevento4.asmx",
+    inutilizationServiceUrl: "https://nfe.sefazrs.rs.gov.br/ws/nfeinutilizacao/nfeinutilizacao4.asmx",
   }),
 });
 
 function jsonResponse(status, payload) {
-  return {
-    status,
-    ok: status >= 200 && status < 300,
-    headers: { "content-type": "application/json", "x-seven-local": "true" },
-    body: JSON.stringify(payload),
-  };
+  return { status, ok: status >= 200 && status < 300, headers: { "content-type": "application/json", "x-seven-local": "true" }, body: JSON.stringify(payload) };
 }
 
-function parseCore(result) {
-  try { return JSON.parse(result?.body || "{}"); }
-  catch { return {}; }
-}
-
-function publicError(error, fallback = "Falha na operação fiscal.") {
-  return error instanceof Error ? error.message : fallback;
-}
-
-function stripDeclaration(value) {
-  return String(value || "").replace(/^\s*<\?xml[^>]*\?>\s*/i, "").trim();
-}
-
+function parseCore(result) { try { return JSON.parse(result?.body || "{}"); } catch { return {}; } }
+function publicError(error, fallback = "Falha na operação fiscal.") { return error instanceof Error ? error.message : fallback; }
+function stripDeclaration(value) { return String(value || "").replace(/^\s*<\?xml[^>]*\?>\s*/i, "").trim(); }
 function resolveEndpoints(company, environment, configuration) {
   const defaults = String(company?.state || "").toUpperCase() === "RS" ? RS_ENDPOINTS[environment] : {};
   return { ...defaults, ...(configuration || {}), environment };
@@ -57,8 +48,8 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
   async function readState() {
     try {
       const parsed = JSON.parse(await readFile(statePath, "utf8"));
-      return parsed && typeof parsed === "object" ? { drafts: {}, transmissions: {}, ...parsed } : { drafts: {}, transmissions: {} };
-    } catch { return { drafts: {}, transmissions: {} }; }
+      return parsed && typeof parsed === "object" ? { drafts: {}, transmissions: {}, inutilizations: [], ...parsed } : { drafts: {}, transmissions: {}, inutilizations: [] };
+    } catch { return { drafts: {}, transmissions: {}, inutilizations: [] }; }
   }
 
   async function writeState(state) {
@@ -95,14 +86,30 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
     return rows.find((item) => item.connector === "__company_profile")?.configuration || null;
   }
 
+  async function serviceContext(environmentValue) {
+    const connections = await getConnections();
+    const company = await getCompany(connections);
+    if (!company || !validateCnpj(company.taxId)) throw new Error("Cadastre a empresa com CNPJ válido antes de operar NF-e.");
+    const environment = environmentValue === "production" ? "production" : "homologation";
+    const connection = connections.find((item) => item.connector === "nfe_sefaz" && item.environment === environment);
+    if (!connection) throw new Error(`Configure NF-e / NFC-e no ambiente de ${environment === "production" ? "produção" : "homologação"}.`);
+    const configuration = resolveEndpoints(company, environment, connection.configuration);
+    const localSecrets = await secretVault.get("nfe_sefaz");
+    const certificateId = text(localSecrets.certificateId);
+    if (!certificateId) throw new Error("Vincule um certificado A1 à integração NF-e neste computador.");
+    const certificateValidation = await certificateVault.validate(certificateId);
+    if (!certificateValidation.valid) throw new Error(`Certificado A1 inválido: ${certificateValidation.error || "não foi possível abrir o PFX/P12"}.`);
+    const certificate = await certificateVault.loadSecret(certificateId);
+    return { company, environment, connection, configuration, certificate };
+  }
+
   function mergeDraft(base, extension, transmission) {
     return {
-      ...base,
-      ...(extension || {}),
-      id: base.id,
+      ...base, ...(extension || {}), id: base.id,
       items: Array.isArray(extension?.items) ? extension.items : (Array.isArray(base.items) ? base.items : []),
       transmission: transmission || null,
       transmissionStatus: transmission?.status || null,
+      cancellation: transmission?.cancellation || null,
       accessKey: transmission?.accessKey || null,
       protocol: transmission?.protocol || null,
       nfeNumber: transmission?.number || null,
@@ -117,30 +124,28 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
     const data = parseCore(coreResult);
     const state = await readState();
     const drafts = (data.drafts || []).map((draft) => mergeDraft(draft, state.drafts[draft.id], state.transmissions[draft.id]));
-    return jsonResponse(200, { ...data, drafts, issuedDocuments: await fiscalDocumentStore.listIssued(), local: true });
+    return jsonResponse(200, {
+      ...data,
+      drafts,
+      issuedDocuments: await fiscalDocumentStore.listIssued(),
+      inutilizations: Array.isArray(state.inutilizations) ? state.inutilizations : [],
+      local: true,
+    });
   }
 
   async function saveDraft(payload) {
     const corePayload = { ...payload };
     delete corePayload.action;
-    const result = await core.apiRequest("/api/nfe-drafts", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(corePayload),
-    });
+    const result = await core.apiRequest("/api/nfe-drafts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(corePayload) });
     if (!result.ok) return result;
     const data = parseCore(result);
     const draftId = data.draft?.id;
     if (!draftId) return jsonResponse(500, { error: "O núcleo local não retornou o identificador do rascunho." });
-
     const extension = await mutateState((state) => {
       state.drafts[draftId] = {
-        ...(state.drafts[draftId] || {}),
-        ...corePayload,
-        id: draftId,
+        ...(state.drafts[draftId] || {}), ...corePayload, id: draftId,
         environment: payload.environment === "production" ? "production" : "homologation",
-        items: Array.isArray(payload.items) ? payload.items : [],
-        savedAt: nowIso(),
+        items: Array.isArray(payload.items) ? payload.items : [], savedAt: nowIso(),
       };
       return state.drafts[draftId];
     });
@@ -151,7 +156,7 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
 
   async function loadDraft(draftId) {
     const id = text(draftId);
-    if (!id) throw new Error("Selecione um rascunho de NF-e para transmitir.");
+    if (!id) throw new Error("Selecione um rascunho de NF-e.");
     const result = await listDrafts();
     const data = parseCore(result);
     const draft = (data.drafts || []).find((item) => item.id === id);
@@ -160,33 +165,19 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
   }
 
   async function fiscalContext(draft) {
-    const connections = await getConnections();
-    const company = await getCompany(connections);
-    if (!company || !validateCnpj(company.taxId)) throw new Error("Cadastre a empresa com CNPJ válido antes de emitir NF-e.");
-    const environment = draft.environment === "production" ? "production" : "homologation";
-    const connection = connections.find((item) => item.connector === "nfe_sefaz" && item.environment === environment);
-    if (!connection) throw new Error(`Configure NF-e / NFC-e no ambiente de ${environment === "production" ? "produção" : "homologação"}.`);
-    const configuration = resolveEndpoints(company, environment, connection.configuration);
-    const localSecrets = await secretVault.get("nfe_sefaz");
-    const certificateId = text(localSecrets.certificateId);
-    if (!certificateId) throw new Error("Vincule um certificado A1 à integração NF-e neste computador.");
-    const certificateValidation = await certificateVault.validate(certificateId);
-    if (!certificateValidation.valid) throw new Error(`Certificado A1 inválido: ${certificateValidation.error || "não foi possível abrir o PFX/P12"}.`);
-    const certificate = await certificateVault.loadSecret(certificateId);
-
-    const blockers = validateNfeDraft({ draft, company });
+    const base = await serviceContext(draft.environment);
+    const blockers = validateNfeDraft({ draft, company: base.company });
     if (blockers.length) {
       const error = new Error("A NF-e possui pendências fiscais e não pode ser transmitida.");
       error.blockers = blockers;
       throw error;
     }
-
     const endpointBlockers = [];
-    if (!text(configuration.authorizationServiceUrl)) endpointBlockers.push("Informe a URL NFeAutorizacao4 para a UF/autorizador.");
-    if (!text(configuration.returnAuthorizationServiceUrl)) endpointBlockers.push("Informe a URL NFeRetAutorizacao4 para a UF/autorizador.");
-    if (!text(configuration.consultationServiceUrl)) endpointBlockers.push("Informe a URL NFeConsulta4 para a UF/autorizador.");
-    const series = Number(digits(company.nfeSeries || configuration.nfeSeries || ""));
-    const startingNumber = Number(digits(configuration.nextNfeNumber || company.nfeNextNumber || ""));
+    if (!text(base.configuration.authorizationServiceUrl)) endpointBlockers.push("Informe a URL NFeAutorizacao4 para a UF/autorizador.");
+    if (!text(base.configuration.returnAuthorizationServiceUrl)) endpointBlockers.push("Informe a URL NFeRetAutorizacao4 para a UF/autorizador.");
+    if (!text(base.configuration.consultationServiceUrl)) endpointBlockers.push("Informe a URL NFeConsulta4 para a UF/autorizador.");
+    const series = Number(digits(base.company.nfeSeries || base.configuration.nfeSeries || ""));
+    const startingNumber = Number(digits(base.configuration.nextNfeNumber || base.company.nfeNextNumber || ""));
     if (!Number.isInteger(series) || series < 0 || series > 999) endpointBlockers.push("Configure uma série NF-e válida entre 0 e 999.");
     if (!Number.isInteger(startingNumber) || startingNumber < 1 || startingNumber > 999999999) endpointBlockers.push("Configure o próximo número de NF-e antes de transmitir; o ERP não presume que a numeração começa em 1.");
     if (endpointBlockers.length) {
@@ -194,7 +185,7 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
       error.blockers = endpointBlockers;
       throw error;
     }
-    return { company, environment, connection, configuration, certificate, series, startingNumber };
+    return { ...base, series, startingNumber };
   }
 
   async function recordTransmission(draftId, patch) {
@@ -210,101 +201,44 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
     const accessKey = parsed.accessKey || transmission.accessKey;
     const signedXml = await fiscalDocumentStore.readIssued(accessKey, "signed");
     const nfeProc = `<?xml version="1.0" encoding="UTF-8"?><nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">${stripDeclaration(signedXml)}${parsed.protocolXml}</nfeProc>`;
-    await fiscalDocumentStore.saveIssued({
-      accessKey,
-      stage: "authorized",
-      xml: nfeProc,
-      metadata: {
-        draftId: draft.id,
-        environment: context.environment,
-        number: transmission.number,
-        series: transmission.series,
-        issuedAt: parsed.receivedAt || nowIso(),
-        status: "authorized",
-        protocol: parsed.protocol,
-        cStat: parsed.protocolStatus,
-        xMotivo: parsed.protocolReason,
-        recipientName: draft.recipientName,
-        recipientTaxId: draft.recipientTaxId,
-        totalCents: draft.totalCents || null,
-      },
-    });
+    await fiscalDocumentStore.saveIssued({ accessKey, stage: "authorized", xml: nfeProc, metadata: {
+      draftId: draft.id, environment: context.environment, number: transmission.number, series: transmission.series,
+      issuedAt: parsed.receivedAt || nowIso(), status: "authorized", protocol: parsed.protocol, cStat: parsed.protocolStatus,
+      xMotivo: parsed.protocolReason, recipientName: draft.recipientName, recipientTaxId: draft.recipientTaxId, totalCents: draft.totalCents || null,
+    } });
     await sequenceStore.mark({ draftId: draft.id, environment: context.environment, series: transmission.series, status: "authorized", accessKey, protocol: parsed.protocol });
     return nfeProc;
   }
 
   async function transmit(draftId) {
     const draft = await loadDraft(draftId);
-    if (draft.transmission?.status === "authorized") {
-      return jsonResponse(200, { ok: true, duplicate: true, draft, transmission: draft.transmission, message: "Esta NF-e já possui protocolo de autorização salvo localmente." });
+    if (["authorized", "cancelled"].includes(draft.transmission?.status)) {
+      return jsonResponse(200, { ok: true, duplicate: true, draft, transmission: draft.transmission, message: draft.transmission.status === "cancelled" ? "Esta NF-e já foi cancelada." : "Esta NF-e já possui protocolo de autorização salvo localmente." });
     }
-
     let context;
     try { context = await fiscalContext(draft); }
-    catch (error) {
-      return jsonResponse(422, { error: publicError(error), blockers: error?.blockers || [], externalRequestPerformed: false });
-    }
+    catch (error) { return jsonResponse(422, { error: publicError(error), blockers: error?.blockers || [], externalRequestPerformed: false }); }
 
     const reservation = await sequenceStore.reserve({ draftId: draft.id, environment: context.environment, series: context.series, startingNumber: context.startingNumber });
-
     let prepared;
     try {
-      const unsigned = buildNfeXml({
-        draft: { ...draft, environment: context.environment },
-        company: context.company,
-        number: reservation.number,
-        series: reservation.series,
-        numericCode: reservation.numericCode,
-        issuedAt: new Date(reservation.issuedAt),
-        appVersion,
-      });
+      const unsigned = buildNfeXml({ draft: { ...draft, environment: context.environment }, company: context.company, number: reservation.number, series: reservation.series, numericCode: reservation.numericCode, issuedAt: new Date(reservation.issuedAt), appVersion });
       prepared = { ...unsigned, ...signNfeXml({ xml: unsigned.xml, pfx: context.certificate.pfx, passphrase: context.certificate.passphrase }) };
     } catch (error) {
       await sequenceStore.mark({ draftId: draft.id, environment: context.environment, series: reservation.series, status: "preparation_failed" });
       return jsonResponse(422, { error: publicError(error, "Falha ao gerar ou assinar NF-e."), blockers: error?.blockers || [], externalRequestPerformed: false });
     }
 
-    await fiscalDocumentStore.saveIssued({
-      accessKey: prepared.accessKey,
-      stage: "signed",
-      xml: prepared.signedXml,
-      metadata: {
-        draftId: draft.id,
-        environment: context.environment,
-        number: reservation.number,
-        series: reservation.series,
-        issuedAt: reservation.issuedAt,
-        status: "signed",
-        recipientName: draft.recipientName,
-        recipientTaxId: draft.recipientTaxId,
-        totalCents: prepared.totals.totalCents,
-      },
-    });
+    await fiscalDocumentStore.saveIssued({ accessKey: prepared.accessKey, stage: "signed", xml: prepared.signedXml, metadata: {
+      draftId: draft.id, environment: context.environment, number: reservation.number, series: reservation.series, issuedAt: reservation.issuedAt,
+      status: "signed", recipientName: draft.recipientName, recipientTaxId: draft.recipientTaxId, totalCents: prepared.totals.totalCents,
+    } });
     await sequenceStore.mark({ draftId: draft.id, environment: context.environment, series: reservation.series, status: "signed", accessKey: prepared.accessKey });
-    await recordTransmission(draft.id, {
-      status: "signed",
-      environment: context.environment,
-      accessKey: prepared.accessKey,
-      number: reservation.number,
-      series: reservation.series,
-      numericCode: reservation.numericCode,
-      issuedAt: reservation.issuedAt,
-      signedAt: nowIso(),
-      totalCents: prepared.totals.totalCents,
-      externalRequestPerformed: false,
-    });
+    await recordTransmission(draft.id, { status: "signed", environment: context.environment, accessKey: prepared.accessKey, number: reservation.number, series: reservation.series, numericCode: reservation.numericCode, issuedAt: reservation.issuedAt, signedAt: nowIso(), totalCents: prepared.totals.totalCents, externalRequestPerformed: false });
 
     let authorization;
     try {
-      authorization = await authorizeNfe({
-        signedXml: prepared.signedXml,
-        batchId: Date.now(),
-        environment: context.environment,
-        authorizationUrl: context.configuration.authorizationServiceUrl,
-        returnAuthorizationUrl: context.configuration.returnAuthorizationServiceUrl,
-        pfx: context.certificate.pfx,
-        passphrase: context.certificate.passphrase,
-      });
+      authorization = await authorizeNfe({ signedXml: prepared.signedXml, batchId: Date.now(), environment: context.environment, authorizationUrl: context.configuration.authorizationServiceUrl, returnAuthorizationUrl: context.configuration.returnAuthorizationServiceUrl, pfx: context.certificate.pfx, passphrase: context.certificate.passphrase });
     } catch (error) {
       const transmission = await recordTransmission(draft.id, { status: "external_error", accessKey: prepared.accessKey, error: publicError(error), externalRequestPerformed: true });
       await sequenceStore.mark({ draftId: draft.id, environment: context.environment, series: reservation.series, status: "external_error", accessKey: prepared.accessKey });
@@ -312,40 +246,18 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
     }
 
     const transmission = await recordTransmission(draft.id, {
-      status: authorization.status,
-      accessKey: prepared.accessKey,
-      number: reservation.number,
-      series: reservation.series,
-      protocol: authorization.protocol || null,
-      receipt: authorization.receipt || null,
-      cStat: authorization.cStat || null,
-      xMotivo: authorization.xMotivo || null,
-      endpoint: authorization.endpoint || null,
-      httpStatus: authorization.httpStatus || null,
-      externalRequestPerformed: true,
-      authorizedAt: authorization.ok ? authorization.receivedAt || nowIso() : null,
+      status: authorization.status, accessKey: prepared.accessKey, number: reservation.number, series: reservation.series,
+      protocol: authorization.protocol || null, receipt: authorization.receipt || null, cStat: authorization.cStat || null,
+      xMotivo: authorization.xMotivo || null, endpoint: authorization.endpoint || null, httpStatus: authorization.httpStatus || null,
+      externalRequestPerformed: true, authorizedAt: authorization.ok ? authorization.receivedAt || nowIso() : null,
     });
 
     if (authorization.ok && authorization.nfeProc) {
-      await fiscalDocumentStore.saveIssued({
-        accessKey: prepared.accessKey,
-        stage: "authorized",
-        xml: authorization.nfeProc,
-        metadata: {
-          draftId: draft.id,
-          environment: context.environment,
-          number: reservation.number,
-          series: reservation.series,
-          issuedAt: transmission.authorizedAt,
-          status: "authorized",
-          protocol: authorization.protocol,
-          cStat: authorization.cStat,
-          xMotivo: authorization.xMotivo,
-          recipientName: draft.recipientName,
-          recipientTaxId: draft.recipientTaxId,
-          totalCents: prepared.totals.totalCents,
-        },
-      });
+      await fiscalDocumentStore.saveIssued({ accessKey: prepared.accessKey, stage: "authorized", xml: authorization.nfeProc, metadata: {
+        draftId: draft.id, environment: context.environment, number: reservation.number, series: reservation.series, issuedAt: transmission.authorizedAt,
+        status: "authorized", protocol: authorization.protocol, cStat: authorization.cStat, xMotivo: authorization.xMotivo,
+        recipientName: draft.recipientName, recipientTaxId: draft.recipientTaxId, totalCents: prepared.totals.totalCents,
+      } });
       await sequenceStore.mark({ draftId: draft.id, environment: context.environment, series: reservation.series, status: "authorized", accessKey: prepared.accessKey, protocol: authorization.protocol });
       return jsonResponse(200, { ok: true, status: "authorized", transmission, accessKey: prepared.accessKey, protocol: authorization.protocol, message: authorization.xMotivo || "NF-e autorizada pela SEFAZ." });
     }
@@ -360,19 +272,13 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
     const transmission = draft.transmission;
     if (!transmission?.receipt) return jsonResponse(422, { error: "Este rascunho não possui recibo pendente da SEFAZ." });
     let context;
-    try { context = await fiscalContext(draft); }
-    catch (error) { return jsonResponse(422, { error: publicError(error), blockers: error?.blockers || [] }); }
+    try { context = await fiscalContext(draft); } catch (error) { return jsonResponse(422, { error: publicError(error), blockers: error?.blockers || [] }); }
     const checked = await consultAuthorizationReceipt({ receipt: transmission.receipt, environment: context.environment, returnAuthorizationUrl: context.configuration.returnAuthorizationServiceUrl, pfx: context.certificate.pfx, passphrase: context.certificate.passphrase });
     const parsed = checked.parsed;
     const next = await recordTransmission(draft.id, {
-      status: parsed.authorized ? "authorized" : (parsed.protocolStatus ? "rejected" : "processing"),
-      cStat: parsed.protocolStatus || parsed.cStat || null,
-      xMotivo: parsed.protocolReason || parsed.xMotivo || null,
-      protocol: parsed.protocol || null,
-      accessKey: parsed.accessKey || transmission.accessKey,
-      authorizedAt: parsed.authorized ? parsed.receivedAt || nowIso() : null,
-      externalRequestPerformed: true,
-      lastReceiptCheckAt: nowIso(),
+      status: parsed.authorized ? "authorized" : (parsed.protocolStatus ? "rejected" : "processing"), cStat: parsed.protocolStatus || parsed.cStat || null,
+      xMotivo: parsed.protocolReason || parsed.xMotivo || null, protocol: parsed.protocol || null, accessKey: parsed.accessKey || transmission.accessKey,
+      authorizedAt: parsed.authorized ? parsed.receivedAt || nowIso() : null, externalRequestPerformed: true, lastReceiptCheckAt: nowIso(),
     });
     if (parsed.authorized) await persistAuthorizedFromProtocol({ draft, transmission: next, parsed, context });
     return jsonResponse(parsed.authorized ? 200 : 202, { ok: parsed.authorized, transmission: next });
@@ -382,18 +288,64 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
     const draft = await loadDraft(draftId);
     if (!draft.transmission?.accessKey) return jsonResponse(422, { error: "Este rascunho ainda não possui chave de acesso reservada/transmitida." });
     let context;
-    try { context = await fiscalContext(draft); }
-    catch (error) { return jsonResponse(422, { error: publicError(error), blockers: error?.blockers || [] }); }
+    try { context = await fiscalContext(draft); } catch (error) { return jsonResponse(422, { error: publicError(error), blockers: error?.blockers || [] }); }
     const result = await consultNfeProtocol({ accessKey: draft.transmission.accessKey, environment: context.environment, consultationUrl: context.configuration.consultationServiceUrl, pfx: context.certificate.pfx, passphrase: context.certificate.passphrase });
-    const transmission = await recordTransmission(draft.id, {
-      status: result.status,
-      cStat: result.cStat,
-      xMotivo: result.xMotivo,
-      protocol: result.protocol || draft.transmission.protocol || null,
-      externalRequestPerformed: true,
-      lastProtocolCheckAt: result.checkedAt,
-    });
-    return jsonResponse(200, { ...result, transmission });
+    const status = draft.transmission.status === "cancelled" ? "cancelled" : result.status;
+    const transmission = await recordTransmission(draft.id, { status, cStat: result.cStat, xMotivo: result.xMotivo, protocol: result.protocol || draft.transmission.protocol || null, externalRequestPerformed: true, lastProtocolCheckAt: result.checkedAt });
+    return jsonResponse(200, { ...result, status, transmission });
+  }
+
+  async function cancelAuthorized(draftId, justification) {
+    const draft = await loadDraft(draftId);
+    const transmission = draft.transmission;
+    if (transmission?.status === "cancelled" && transmission?.cancellation?.accepted) return jsonResponse(200, { ok: true, duplicate: true, status: "cancelled", transmission, cancellation: transmission.cancellation, message: "Cancelamento já registrado localmente." });
+    if (transmission?.status !== "authorized" || !transmission.accessKey || !transmission.protocol) return jsonResponse(422, { error: "Somente NF-e autorizada com chave e protocolo pode ser cancelada." });
+    let context;
+    try { context = await serviceContext(draft.environment); } catch (error) { return jsonResponse(422, { error: publicError(error) }); }
+    if (!text(context.configuration.eventServiceUrl)) return jsonResponse(422, { error: "Informe a URL NFeRecepcaoEvento4 para cancelamento." });
+
+    let result;
+    try {
+      result = await cancelNfe({ accessKey: transmission.accessKey, protocol: transmission.protocol, companyTaxId: context.company.taxId, environment: context.environment, justification, eventUrl: context.configuration.eventServiceUrl, pfx: context.certificate.pfx, passphrase: context.certificate.passphrase });
+    } catch (error) { return jsonResponse(422, { error: publicError(error), externalRequestPerformed: false }); }
+
+    await fiscalDocumentStore.saveIssued({ accessKey: transmission.accessKey, stage: "cancel-event-signed", xml: result.signedEventXml, metadata: { status: transmission.status, cancellationAttemptAt: result.checkedAt } });
+    if (result.ok && result.procEventoNFe) {
+      await fiscalDocumentStore.saveIssued({ accessKey: transmission.accessKey, stage: "cancelled", xml: result.procEventoNFe, metadata: { status: "cancelled", cancellationProtocol: result.protocol, cancellationAt: result.registeredAt || result.checkedAt, cancellationCStat: result.cStat, cancellationReason: result.xMotivo } });
+    }
+    const cancellation = { accepted: result.ok, status: result.status, protocol: result.protocol, cStat: result.cStat, xMotivo: result.xMotivo, registeredAt: result.registeredAt, checkedAt: result.checkedAt, late: result.late, endpoint: result.endpoint };
+    const next = await recordTransmission(draft.id, { status: result.ok ? "cancelled" : "authorized", cancellation, externalRequestPerformed: true });
+    if (result.ok) await sequenceStore.mark({ draftId: draft.id, environment: context.environment, series: transmission.series, status: "cancelled", accessKey: transmission.accessKey, protocol: transmission.protocol });
+    return jsonResponse(result.ok ? 200 : 422, { ok: result.ok, status: result.status, cancellation, transmission: next, error: result.ok ? null : (result.xMotivo || "Cancelamento não aceito pela SEFAZ."), message: result.ok ? (result.xMotivo || "Cancelamento registrado pela SEFAZ.") : null, externalRequestPerformed: true });
+  }
+
+  async function inutilize(payload) {
+    const environment = payload.environment === "production" ? "production" : "homologation";
+    let context;
+    try { context = await serviceContext(environment); } catch (error) { return jsonResponse(422, { error: publicError(error) }); }
+    if (!text(context.configuration.inutilizationServiceUrl)) return jsonResponse(422, { error: "Informe a URL NFeInutilizacao4 para a UF/autorizador." });
+    const uf = text(context.company.state).toUpperCase();
+    const ufCode = UF_CODES[uf];
+    if (!ufCode) return jsonResponse(422, { error: "UF do emitente inválida para inutilização." });
+    const series = Number(digits(payload.series));
+    const startNumber = Number(digits(payload.startNumber));
+    const endNumber = Number(digits(payload.endNumber));
+    const sequenceState = await sequenceStore.status();
+    const reservations = Object.values(sequenceState.reservations || {});
+    const conflict = reservations.find((row) => row.environment === environment && Number(row.series) === series && Number(row.number) >= startNumber && Number(row.number) <= endNumber);
+    if (conflict) return jsonResponse(409, { error: `A faixa contém o número ${conflict.number}, já reservado pelo ERP no rascunho ${conflict.draftId}. Não é seguro inutilizar uma numeração já usada/reservada.` });
+
+    let result;
+    try {
+      result = await inutilizeNfeNumbers({ ufCode, year: payload.year || new Date().getFullYear(), companyTaxId: context.company.taxId, model: "55", series, startNumber, endNumber, environment, justification: payload.justification, inutilizationUrl: context.configuration.inutilizationServiceUrl, pfx: context.certificate.pfx, passphrase: context.certificate.passphrase });
+    } catch (error) { return jsonResponse(422, { error: publicError(error), externalRequestPerformed: false }); }
+
+    const id = `${environment}-${String(payload.year || new Date().getFullYear())}-${series}-${startNumber}-${endNumber}`;
+    await fiscalDocumentStore.saveStandalone({ category: "nfe-inutilization", id, stage: "signed", xml: result.signedRequestXml, metadata: { environment, year: Number(payload.year || new Date().getFullYear()), series, startNumber, endNumber, status: "signed" } });
+    if (result.ok && result.procInutNFe) await fiscalDocumentStore.saveStandalone({ category: "nfe-inutilization", id, stage: "processed", xml: result.procInutNFe, metadata: { environment, year: Number(payload.year || new Date().getFullYear()), series, startNumber, endNumber, status: "inutilized", protocol: result.protocol, cStat: result.cStat, xMotivo: result.xMotivo, receivedAt: result.receivedAt } });
+    const record = { id, environment, year: Number(payload.year || new Date().getFullYear()), series, startNumber, endNumber, status: result.status, protocol: result.protocol, cStat: result.cStat, xMotivo: result.xMotivo, receivedAt: result.receivedAt, checkedAt: result.checkedAt };
+    await mutateState((state) => { state.inutilizations = [record, ...(state.inutilizations || []).filter((item) => item.id !== id)].slice(0, 500); return record; });
+    return jsonResponse(result.ok ? 200 : 422, { ok: result.ok, status: result.status, inutilization: record, error: result.ok ? null : (result.xMotivo || "Inutilização não aceita pela SEFAZ."), message: result.ok ? (result.xMotivo || "Faixa inutilizada pela SEFAZ.") : null, externalRequestPerformed: true });
   }
 
   async function api(method, payload = {}) {
@@ -402,10 +354,12 @@ export function createNfeService({ dataDir, core, certificateVault, secretVault,
     if (payload.action === "transmit") return transmit(payload.draftId);
     if (payload.action === "consult_receipt") return consultReceipt(payload.draftId);
     if (payload.action === "consult_protocol") return consultProtocol(payload.draftId);
+    if (payload.action === "cancel") return cancelAuthorized(payload.draftId, payload.justification);
+    if (payload.action === "inutilize") return inutilize(payload);
     return saveDraft(payload);
   }
 
-  return { api, transmit, consultReceipt, consultProtocol, listDrafts };
+  return { api, transmit, consultReceipt, consultProtocol, cancelAuthorized, inutilize, listDrafts };
 }
 
 export { RS_ENDPOINTS };

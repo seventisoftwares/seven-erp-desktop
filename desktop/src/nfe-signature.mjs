@@ -62,9 +62,13 @@ export function extractSigningMaterialFromPfx({ pfx, passphrase = "" }) {
   };
 }
 
-export function signNfeXml({ xml, pfx, passphrase = "" }) {
+export function signFiscalXmlElement({ xml, elementName, expectedIdPattern, pfx, passphrase = "" }) {
   const source = String(xml || "").trim();
-  if (!/<infNFe\b[^>]*\bId=["']NFe[A-Z0-9]{44}["']/i.test(source)) throw new Error("XML NF-e sem infNFe/Id válido para assinatura.");
+  const name = String(elementName || "").trim();
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(name)) throw new Error("Elemento XML inválido para assinatura fiscal.");
+  const idMatch = source.match(new RegExp(`<${name}\\b[^>]*\\bId=["']([^"']+)["']`, "i"));
+  if (!idMatch) throw new Error(`XML fiscal sem ${name}/Id para assinatura.`);
+  if (expectedIdPattern && !expectedIdPattern.test(idMatch[1])) throw new Error(`Id de ${name} não atende ao padrão fiscal esperado.`);
   if (/<(?:\w+:)?Signature\b/i.test(source)) throw new Error("O XML informado já contém assinatura digital.");
 
   const material = extractSigningMaterialFromPfx({ pfx, passphrase });
@@ -76,18 +80,29 @@ export function signNfeXml({ xml, pfx, passphrase = "" }) {
     signatureAlgorithm: XMLDSIG.rsaSha1,
     getKeyInfoContent: () => `<X509Data><X509Certificate>${material.certificateBase64}</X509Certificate></X509Data>`,
   });
+  const xpath = `//*[local-name(.)='${name}']`;
   signer.addReference({
-    xpath: "//*[local-name(.)='infNFe']",
+    xpath,
     transforms: [XMLDSIG.enveloped, XMLDSIG.c14n],
     digestAlgorithm: XMLDSIG.digestSha1,
   });
-  signer.computeSignature(source, {
-    location: { reference: "//*[local-name(.)='infNFe']", action: "after" },
-  });
+  signer.computeSignature(source, { location: { reference: xpath, action: "after" } });
   const signedXml = signer.getSignedXml();
   if (!/<Signature\b[^>]*xmlns=["']http:\/\/www\.w3\.org\/2000\/09\/xmldsig#["']/i.test(signedXml)) throw new Error("A biblioteca de assinatura não produziu o elemento Signature esperado.");
   if (!/<X509Certificate>[^<]+<\/X509Certificate>/i.test(signedXml)) throw new Error("A assinatura não contém o certificado X.509 exigido.");
-  return { signedXml, certificate: { serialNumber: material.serialNumber, subject: material.subject } };
+  return { signedXml, signedId: idMatch[1], certificate: { serialNumber: material.serialNumber, subject: material.subject } };
+}
+
+export function signNfeXml({ xml, pfx, passphrase = "" }) {
+  return signFiscalXmlElement({ xml, elementName: "infNFe", expectedIdPattern: /^NFe[A-Z0-9]{44}$/, pfx, passphrase });
+}
+
+export function signNfeEventXml({ xml, pfx, passphrase = "" }) {
+  return signFiscalXmlElement({ xml, elementName: "infEvento", expectedIdPattern: /^ID\d{6}[A-Z0-9]{44}\d{2}$/, pfx, passphrase });
+}
+
+export function signNfeInutilizacaoXml({ xml, pfx, passphrase = "" }) {
+  return signFiscalXmlElement({ xml, elementName: "infInut", expectedIdPattern: /^ID[A-Z0-9]{41}$/, pfx, passphrase });
 }
 
 export { XMLDSIG };
