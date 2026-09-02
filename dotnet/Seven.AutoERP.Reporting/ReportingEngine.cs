@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Majorsilence.Reporting.Rdl;
 using Majorsilence.Reporting.RdlCreator;
 using QRCoder;
 using Seven.AutoERP.Contracts;
