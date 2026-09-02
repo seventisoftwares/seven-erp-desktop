@@ -2,15 +2,17 @@
 
 import { useEffect, useState } from "react";
 import SevenErpApp from "./seven-erp-app";
-import ServiceOrdersModuleV3 from "./service-orders-module-v3";
+import ServiceOrdersModuleV4 from "./service-orders-module-v4";
+import OsTemplateDesigner from "./os-template-designer";
 import IntegrationsModuleV7 from "./integrations-module-v7";
 import DfeReceivedModule from "./dfe-received-module";
 import MeshDevicesModule from "./mesh-devices-module";
 import CompanyModule from "./company-module";
 import "./erp-enhancements.css";
 import "./erp-professional.css";
+import "./os-studio.css";
 
-type EnhancedModule = "service" | "integrations" | "dfe" | "devices" | "company" | null;
+type EnhancedModule = "service" | "osDesigner" | "integrations" | "dfe" | "devices" | "company" | null;
 
 export default function SevenErpShell() {
   const [enhancedModule, setEnhancedModule] = useState<EnhancedModule>(null);
@@ -23,6 +25,7 @@ export default function SevenErpShell() {
       const label = (button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
       if (label.includes("integrações e ajustes")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("integrations"); return; }
       if (label.includes("manifestação nf-e") || label.includes("manifestacao nf-e")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("dfe"); return; }
+      if (label.includes("designer de os") || label.includes("modelos de os") || label.includes("modelos de ordem")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("osDesigner"); return; }
       if (label.includes("ordem de serviço") || label.includes("ordens de serviço")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("service"); return; }
       if (label.includes("dispositivos e sincronização")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("devices"); return; }
       if (label.includes("cadastro da empresa")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("company"); return; }
@@ -32,11 +35,14 @@ export default function SevenErpShell() {
     return () => document.removeEventListener("click", intercept, true);
   }, [enhancedModule]);
 
+  const theme = enhancedModule === "integrations" ? "theme-integrations" : enhancedModule === "company" ? "theme-company" : enhancedModule === "dfe" ? "theme-dfe" : enhancedModule === "devices" ? "theme-devices" : enhancedModule === "service" ? "theme-service" : enhancedModule === "osDesigner" ? "theme-os-studio" : "";
+
   return <div className="seven-erp-shell">
     <SevenErpApp />
     {!enhancedModule && <button className="company-nav-shortcut" onClick={() => setEnhancedModule("company")}><span>🏢</span><div><strong>Cadastro da empresa</strong><small>Dados fiscais e cadastrais</small></div></button>}
-    {enhancedModule && <div className="seven-enhancement-overlay">
-      {enhancedModule === "service" ? <ServiceOrdersModuleV3 onClose={() => setEnhancedModule(null)} />
+    {enhancedModule && <div className={`seven-enhancement-overlay ${theme}`}>
+      {enhancedModule === "service" ? <ServiceOrdersModuleV4 onClose={() => setEnhancedModule(null)} onOpenDesigner={() => setEnhancedModule("osDesigner")} />
+        : enhancedModule === "osDesigner" ? <OsTemplateDesigner onClose={() => setEnhancedModule("service")} />
         : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "company" ? <CompanyModule onClose={() => setEnhancedModule(null)} />
