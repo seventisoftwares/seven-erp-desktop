@@ -1,7 +1,7 @@
-import { buildReferenceDanfeHtml, extractReferenceDanfeData } from "./nfe-danfe-reference.mjs";
+import { buildReferenceDanfeFitHtml, extractReferenceDanfeData } from "./nfe-danfe-reference-fit.mjs";
 export { encodeCode128, code128Svg, parseNfeProc } from "./nfe-danfe-core.mjs";
 export { extractReferenceDanfeData };
-export const buildDanfeHtml = buildReferenceDanfeHtml;
+export const buildDanfeHtml = buildReferenceDanfeFitHtml;
 export function extractClassicData(xml) {
   const data = extractReferenceDanfeData(xml);
   return {
