@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld("sevenDesktop", {
   documentRenderPdf: (payload) => ipcRenderer.invoke("seven:document-render-pdf", payload),
   fiscalZeus: (command, payload) => ipcRenderer.invoke("seven:fiscal-zeus", command, payload),
   danfeZeusPdf: (payload) => ipcRenderer.invoke("seven:danfe-zeus-pdf", payload),
+  fiscalConfigGet: (section) => ipcRenderer.invoke("seven:fiscal-config-get", section),
+  fiscalConfigSet: (section, payload, actor) => ipcRenderer.invoke("seven:fiscal-config-set", section, payload, actor),
+  fiscalConfigAudit: (limit) => ipcRenderer.invoke("seven:fiscal-config-audit", limit),
   onStatus: (callback) => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on("seven:status", listener);
