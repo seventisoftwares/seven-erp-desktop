@@ -1,0 +1,181 @@
+"use client";
+
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { OS_TEMPLATE_ACTIVE_KEY, OS_TEMPLATE_STORAGE_KEY, defaultOsTemplates, renderOsTemplateHtml, type OsPrintData, type OsTemplate } from "./os-template-core";
+
+type Customer = { id: string; legalName: string; tradeName?: string | null; taxId?: string | null; phone?: string | null; email?: string | null };
+type Order = { id: string; number: number; partyId: string; customerName?: string | null; customerTradeName?: string | null; customerTaxId?: string | null; customerPhone?: string | null; customerEmail?: string | null; status: string; priority: string; equipmentType?: string | null; equipmentBrand?: string | null; equipmentModel?: string | null; serialNumber?: string | null; reportedIssue: string; diagnosis?: string | null; solution?: string | null; technicianEmail?: string | null; laborCents: number; partsCents: number; totalCents: number; openedAt: string; closedAt?: string | null };
+type Company = { legalName?: string; tradeName?: string; taxId?: string; phone?: string; email?: string; street?: string; number?: string; district?: string; city?: string; state?: string };
+
+const money = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format((Number(value) || 0) / 100);
+const statuses: Record<string,string> = { open: "Entrada", diagnosis: "Diagnóstico", waiting_approval: "Aguard. aprovação", approved: "Aprovada", in_progress: "Em execução", finished: "Finalizada", delivered: "Entregue", cancelled: "Cancelada" };
+const priorities: Record<string,string> = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };
+const boardColumns = ["open", "diagnosis", "waiting_approval", "approved", "in_progress", "finished"];
+
+function icon(name: string) {
+  const map: Record<string,string> = { plus: "+", grid: "▦", list: "☷", design: "✦", search: "⌕", print: "▤", edit: "✎", money: "$", clock: "◷", wrench: "⚒", refresh: "↻", customer: "◎", car: "◇" };
+  return <span className="os-op-icon" aria-hidden="true">{map[name] || "•"}</span>;
+}
+
+function activeTemplate(): OsTemplate {
+  const defaults = defaultOsTemplates();
+  if (typeof window === "undefined") return defaults[0];
+  try {
+    const rows = JSON.parse(localStorage.getItem(OS_TEMPLATE_STORAGE_KEY) || "[]") as OsTemplate[];
+    const available = Array.isArray(rows) && rows.length ? rows : defaults;
+    if (!rows?.length) localStorage.setItem(OS_TEMPLATE_STORAGE_KEY, JSON.stringify(defaults));
+    const id = localStorage.getItem(OS_TEMPLATE_ACTIVE_KEY) || available[0].id;
+    return available.find((item) => item.id === id) || available[0];
+  } catch { return defaults[0]; }
+}
+
+function osPrintData(order: Order, company: Company): OsPrintData {
+  const companyAddress = [company.street, company.number, company.district, company.city && company.state ? `${company.city}/${company.state}` : company.city].filter(Boolean).join(" · ");
+  return {
+    osNumber: `OS #${String(order.number).padStart(5,"0")}`,
+    openedAt: new Date(order.openedAt).toLocaleString("pt-BR"), status: statuses[order.status] || order.status, priority: priorities[order.priority] || order.priority,
+    customerName: order.customerTradeName || order.customerName || "", customerTaxId: order.customerTaxId || "", customerPhone: order.customerPhone || "", customerEmail: order.customerEmail || "",
+    equipment: [order.equipmentType, order.equipmentBrand, order.equipmentModel].filter(Boolean).join(" · "), serialNumber: order.serialNumber || "",
+    reportedIssue: order.reportedIssue || "", diagnosis: order.diagnosis || "", solution: order.solution || "", technician: order.technicianEmail || "",
+    labor: money(order.laborCents), parts: money(order.partsCents), total: money(order.totalCents),
+    companyName: company.tradeName || company.legalName || "", companyTaxId: company.taxId || "", companyPhone: company.phone || "", companyEmail: company.email || "", companyAddress,
+  };
+}
+
+function printOrder(order: Order, company: Company) {
+  const template = activeTemplate();
+  const win = window.open("", "_blank", "width=980,height=900");
+  if (!win) throw new Error("A janela de impressão foi bloqueada pelo sistema.");
+  win.document.open(); win.document.write(renderOsTemplateHtml(template, osPrintData(order, company))); win.document.close();
+}
+
+export default function ServiceOrdersModuleV4({ onClose, onOpenDesigner }: { onClose: () => void; onOpenDesigner: () => void }) {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [company, setCompany] = useState<Company>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [newOpen, setNewOpen] = useState(false);
+  const [selected, setSelected] = useState<Order | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [customerMode, setCustomerMode] = useState<"existing"|"new">("existing");
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [view, setView] = useState<"board"|"list">("board");
+
+  const load = async () => {
+    setLoading(true); setError("");
+    try {
+      const [o, c, e] = await Promise.all([fetch("/api/service-orders"), fetch("/api/customers"), fetch("/api/company")]);
+      const [od, cd, ed] = await Promise.all([o.json(), c.json(), e.json()]);
+      if (!o.ok) throw new Error(od.error || "Falha ao carregar OS.");
+      if (!c.ok) throw new Error(cd.error || "Falha ao carregar clientes.");
+      setOrders(od.orders || []); setCustomers(cd.customers || []); if (e.ok) setCompany(ed.company || {});
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Falha ao carregar Ordens de Serviço."); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const filtered = useMemo(() => orders.filter((o) => (statusFilter === "all" || o.status === statusFilter) && (!query.trim() || [o.number,o.customerName,o.customerTradeName,o.equipmentType,o.equipmentBrand,o.equipmentModel,o.serialNumber,o.reportedIssue].join(" ").toLowerCase().includes(query.toLowerCase()))), [orders, query, statusFilter]);
+  const activeOrders = orders.filter((o) => !["finished","delivered","cancelled"].includes(o.status));
+  const urgent = activeOrders.filter((o) => ["high","urgent"].includes(o.priority));
+  const waiting = orders.filter((o) => o.status === "waiting_approval");
+  const finished = orders.filter((o) => ["finished","delivered"].includes(o.status));
+
+  const create = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setSaving(true); setError(""); setNotice("");
+    const raw = Object.fromEntries(new FormData(event.currentTarget).entries()) as Record<string,string>;
+    try {
+      let partyId = raw.partyId;
+      if (customerMode === "new") {
+        if (!raw.newCustomerName?.trim()) throw new Error("Informe o nome/razão social do novo cliente.");
+        const response = await fetch("/api/customers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ legalName: raw.newCustomerName, tradeName: raw.newCustomerTradeName, taxId: raw.newCustomerTaxId, phone: raw.newCustomerPhone, email: raw.newCustomerEmail, personType: "legal" }) });
+        const data = await response.json(); if (!response.ok) throw new Error(data.error || "Não foi possível cadastrar o cliente."); partyId = data.customer?.id;
+      }
+      if (!partyId) throw new Error("Selecione ou cadastre um cliente.");
+      const payload = { partyId, priority: raw.priority, equipmentType: raw.equipmentType, equipmentBrand: raw.equipmentBrand, equipmentModel: raw.equipmentModel, serialNumber: raw.serialNumber, reportedIssue: raw.reportedIssue, diagnosis: raw.diagnosis, technicianEmail: raw.technicianEmail, labor: raw.labor, parts: raw.parts };
+      const response = await fetch("/api/service-orders", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Não foi possível emitir a OS.");
+      setNewOpen(false); setCustomerMode("existing"); setNotice(`OS #${String(data.order.number).padStart(5,"0")} aberta com sucesso.`); await load(); setSelected(data.order);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Não foi possível emitir a OS."); }
+    finally { setSaving(false); }
+  };
+
+  const update = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); if (!selected) return; setSaving(true); setError("");
+    const raw = Object.fromEntries(new FormData(event.currentTarget).entries());
+    try {
+      const response = await fetch("/api/service-orders", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: selected.id, ...raw }) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Falha ao atualizar OS."); setSelected(data.order); setEditing(false); setNotice("OS atualizada."); await load();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Falha ao atualizar OS."); }
+    finally { setSaving(false); }
+  };
+
+  const setStatus = async (order: Order, status: string) => {
+    try {
+      const response = await fetch("/api/service-orders", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: order.id, status }) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Não foi possível alterar o status."); await load(); if (selected?.id === order.id) setSelected(data.order);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Falha ao mover OS."); }
+  };
+
+  const handlePrint = (order: Order) => { try { printOrder(order, company); } catch (caught) { setError(caught instanceof Error ? caught.message : "Falha ao imprimir OS."); } };
+
+  return <div className="os-operations">
+    <aside className="os-ops-rail">
+      <button className="os-rail-back" onClick={onClose}>←</button>
+      <div className="os-rail-brand"><span>OS</span><strong>Operações</strong></div>
+      <nav>
+        <button className={view === "board" ? "active" : ""} onClick={() => setView("board")}>{icon("grid")}<span>Quadro</span></button>
+        <button className={view === "list" ? "active" : ""} onClick={() => setView("list")}>{icon("list")}<span>Lista</span></button>
+        <button onClick={onOpenDesigner}>{icon("design")}<span>Modelos</span></button>
+      </nav>
+      <div className="os-rail-bottom"><small>Modelo de impressão</small><strong>{activeTemplate().name}</strong><button onClick={onOpenDesigner}>Alterar modelo</button></div>
+    </aside>
+
+    <main className="os-ops-main">
+      <header className="os-ops-header">
+        <div><span>OFICINA / ASSISTÊNCIA · CENTRAL OPERACIONAL</span><h1>Ordens de Serviço</h1><p>Acompanhe o trabalho por etapa, prioridade e responsável. A impressão usa o modelo criado no Seven OS Studio.</p></div>
+        <div className="os-ops-header-actions"><button className="os-model-button" onClick={onOpenDesigner}>{icon("design")}Designer de modelos</button><button className="os-new-button" onClick={() => { setNewOpen(true); setError(""); }}>{icon("plus")}Nova OS</button></div>
+      </header>
+
+      {!company.legalName && <div className="os-ops-warning"><strong>Empresa sem cadastro completo.</strong><span>Preencha o cadastro da empresa para o cabeçalho da OS sair corretamente.</span></div>}
+      {error && <div className="os-ops-message error">{error}<button onClick={() => setError("")}>×</button></div>}
+      {notice && <div className="os-ops-message success">{notice}<button onClick={() => setNotice("")}>×</button></div>}
+
+      <section className="os-ops-command-grid">
+        <article className="os-command-card primary"><span>{icon("wrench")}</span><div><small>EM ANDAMENTO</small><strong>{activeOrders.length}</strong><em>ordens ativas</em></div></article>
+        <article className="os-command-card urgent"><span>!</span><div><small>PRIORIDADE</small><strong>{urgent.length}</strong><em>alta ou urgente</em></div></article>
+        <article className="os-command-card waiting"><span>{icon("clock")}</span><div><small>AGUARDANDO CLIENTE</small><strong>{waiting.length}</strong><em>aprovação pendente</em></div></article>
+        <article className="os-command-card revenue"><span>{icon("money")}</span><div><small>FINALIZADO</small><strong>{money(finished.reduce((sum,o) => sum + o.totalCents, 0))}</strong><em>{finished.length} OS concluídas</em></div></article>
+      </section>
+
+      <section className="os-ops-tools"><div className="os-search-box">{icon("search")}<input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar OS, cliente, placa/série, equipamento ou defeito..." /></div><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="all">Todos os status</option>{Object.entries(statuses).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select><button onClick={() => void load()}>{icon("refresh")}Atualizar</button></section>
+
+      {loading ? <div className="os-ops-loading">Carregando central operacional...</div> : view === "board" ? <section className="os-kanban">{boardColumns.map((status) => {
+        const rows = filtered.filter((order) => order.status === status);
+        return <div className={`os-kanban-column column-${status}`} key={status}><header><div><i /><strong>{statuses[status]}</strong></div><span>{rows.length}</span></header><div className="os-kanban-stack">{rows.map((order) => <article className={`os-kanban-card priority-${order.priority}`} key={order.id} onClick={() => { setSelected(order); setEditing(false); }}><div className="os-card-top"><b>#{String(order.number).padStart(5,"0")}</b><span>{priorities[order.priority]}</span></div><h3>{order.customerTradeName || order.customerName}</h3><p>{[order.equipmentBrand, order.equipmentModel].filter(Boolean).join(" ") || order.equipmentType || "Sem equipamento informado"}</p><small>{order.serialNumber || "Sem placa/série"}</small><div className="os-card-issue">{order.reportedIssue}</div><footer><span>{money(order.totalCents)}</span><time>{new Date(order.openedAt).toLocaleDateString("pt-BR")}</time></footer></article>)}{!rows.length && <div className="os-kanban-empty">Nenhuma OS</div>}</div></div>;
+      })}</section> : <section className="os-list-workspace"><div className="os-list-head"><div><strong>Fila completa</strong><span>{filtered.length} registro(s)</span></div><button onClick={() => setNewOpen(true)}>{icon("plus")}Adicionar OS</button></div><div className="os-list-table-wrap"><table className="os-list-table"><thead><tr><th>OS</th><th>Cliente</th><th>Equipamento</th><th>Abertura</th><th>Etapa</th><th>Prioridade</th><th>Total</th><th></th></tr></thead><tbody>{filtered.map((order) => <tr key={order.id}><td><strong>#{String(order.number).padStart(5,"0")}</strong></td><td><strong>{order.customerTradeName || order.customerName}</strong><small>{order.customerTaxId || "Sem documento"}</small></td><td><span>{[order.equipmentBrand,order.equipmentModel].filter(Boolean).join(" ") || order.equipmentType || "—"}</span><small>{order.serialNumber || "—"}</small></td><td>{new Date(order.openedAt).toLocaleDateString("pt-BR")}</td><td><span className={`os-stage stage-${order.status}`}>{statuses[order.status] || order.status}</span></td><td><span className={`os-priority priority-${order.priority}`}>{priorities[order.priority]}</span></td><td><strong>{money(order.totalCents)}</strong></td><td><button onClick={() => { setSelected(order); setEditing(false); }}>Abrir →</button></td></tr>)}</tbody></table></div></section>}
+    </main>
+
+    {newOpen && <div className="os-drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setNewOpen(false)}><form className="os-drawer" onSubmit={create}><header><div><span>NOVA ORDEM DE SERVIÇO</span><h2>Abrir atendimento</h2><p>Cadastre cliente, equipamento e demanda em uma única etapa.</p></div><button type="button" onClick={() => setNewOpen(false)}>×</button></header><div className="os-drawer-scroll">
+      <div className="os-customer-switch"><button type="button" className={customerMode === "existing" ? "active" : ""} onClick={() => setCustomerMode("existing")}>{icon("customer")}Cliente cadastrado</button><button type="button" className={customerMode === "new" ? "active" : ""} onClick={() => setCustomerMode("new")}>{icon("plus")}Novo cliente</button></div>
+      <section className="os-form-section"><div className="os-form-section-title"><b>01</b><span><strong>Cliente</strong><small>Quem está solicitando o serviço</small></span></div><div className="os-form-grid">{customerMode === "existing" ? <label className="wide"><span>Cliente *</span><select name="partyId" required defaultValue=""><option value="">Selecione...</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.tradeName || c.legalName}</option>)}</select></label> : <><label className="wide"><span>Nome / Razão social *</span><input name="newCustomerName" required /></label><label><span>Nome fantasia</span><input name="newCustomerTradeName" /></label><label><span>CPF/CNPJ</span><input name="newCustomerTaxId" /></label><label><span>Telefone</span><input name="newCustomerPhone" /></label><label><span>E-mail</span><input name="newCustomerEmail" type="email" /></label></>}</div></section>
+      <section className="os-form-section"><div className="os-form-section-title"><b>02</b><span><strong>Equipamento / veículo</strong><small>Identificação do item em atendimento</small></span></div><div className="os-form-grid"><label><span>Tipo</span><input name="equipmentType" placeholder="Veículo, notebook, impressora..." /></label><label><span>Marca</span><input name="equipmentBrand" /></label><label><span>Modelo</span><input name="equipmentModel" /></label><label><span>Placa / número de série</span><input name="serialNumber" /></label><label><span>Prioridade</span><select name="priority" defaultValue="normal">{Object.entries(priorities).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select></label><label><span>Técnico responsável</span><input name="technicianEmail" type="email" /></label></div></section>
+      <section className="os-form-section"><div className="os-form-section-title"><b>03</b><span><strong>Demanda</strong><small>Relato inicial e orçamento básico</small></span></div><div className="os-form-grid"><label className="wide"><span>Defeito relatado / serviço solicitado *</span><textarea name="reportedIssue" required rows={4} /></label><label className="wide"><span>Diagnóstico inicial</span><textarea name="diagnosis" rows={3} /></label><label><span>Mão de obra (R$)</span><input name="labor" type="number" step="0.01" min="0" defaultValue="0" /></label><label><span>Peças / materiais (R$)</span><input name="parts" type="number" step="0.01" min="0" defaultValue="0" /></label></div></section>
+    </div><footer><button type="button" onClick={() => setNewOpen(false)}>Cancelar</button><button className="primary" disabled={saving}>{saving ? "Abrindo..." : "Abrir Ordem de Serviço"}</button></footer></form></div>}
+
+    {selected && <div className="os-detail-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSelected(null)}><section className="os-detail-panel"><header><div><span>ORDEM DE SERVIÇO</span><h2>#{String(selected.number).padStart(5,"0")}</h2><p>{selected.customerTradeName || selected.customerName}</p></div><button onClick={() => setSelected(null)}>×</button></header>
+      {editing ? <form className="os-detail-edit" onSubmit={update}><div className="os-form-grid"><label><span>Status</span><select name="status" defaultValue={selected.status}>{Object.entries(statuses).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select></label><label><span>Prioridade</span><select name="priority" defaultValue={selected.priority}>{Object.entries(priorities).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select></label><label className="wide"><span>Diagnóstico</span><textarea name="diagnosis" rows={5} defaultValue={selected.diagnosis || ""} /></label><label className="wide"><span>Solução / serviço executado</span><textarea name="solution" rows={5} defaultValue={selected.solution || ""} /></label><label><span>Mão de obra</span><input name="labor" type="number" step="0.01" min="0" defaultValue={(selected.laborCents/100).toFixed(2)} /></label><label><span>Peças / materiais</span><input name="parts" type="number" step="0.01" min="0" defaultValue={(selected.partsCents/100).toFixed(2)} /></label><label className="wide"><span>Técnico responsável</span><input name="technicianEmail" type="email" defaultValue={selected.technicianEmail || ""} /></label></div><footer><button type="button" onClick={() => setEditing(false)}>Cancelar</button><button className="primary" disabled={saving}>Salvar alterações</button></footer></form> : <div className="os-detail-content">
+        <div className="os-detail-stagebar"><select value={selected.status} onChange={(e) => void setStatus(selected, e.target.value)}>{Object.entries(statuses).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select><span className={`os-priority priority-${selected.priority}`}>{priorities[selected.priority]}</span></div>
+        <section className="os-detail-hero"><div><small>CLIENTE</small><strong>{selected.customerTradeName || selected.customerName}</strong><span>{selected.customerTaxId || "Documento não informado"}</span></div><div><small>EQUIPAMENTO / VEÍCULO</small><strong>{[selected.equipmentBrand,selected.equipmentModel].filter(Boolean).join(" ") || selected.equipmentType || "Não informado"}</strong><span>{selected.serialNumber || "Sem placa/série"}</span></div></section>
+        <section className="os-detail-block"><span>SERVIÇO SOLICITADO / RELATO</span><p>{selected.reportedIssue}</p></section>
+        <div className="os-detail-columns"><section className="os-detail-block"><span>DIAGNÓSTICO</span><p>{selected.diagnosis || "Ainda não informado."}</p></section><section className="os-detail-block"><span>SERVIÇO EXECUTADO</span><p>{selected.solution || "Ainda não informado."}</p></section></div>
+        <section className="os-detail-values"><div><small>Mão de obra</small><strong>{money(selected.laborCents)}</strong></div><div><small>Peças / materiais</small><strong>{money(selected.partsCents)}</strong></div><div className="total"><small>Total da OS</small><strong>{money(selected.totalCents)}</strong></div></section>
+        <section className="os-detail-meta"><span>Abertura: {new Date(selected.openedAt).toLocaleString("pt-BR")}</span><span>Técnico: {selected.technicianEmail || "Não atribuído"}</span></section>
+      </div>}
+      {!editing && <footer className="os-detail-actions"><button onClick={onOpenDesigner}>{icon("design")}Modelo</button><button onClick={() => handlePrint(selected)}>{icon("print")}Imprimir OS</button><button className="primary" onClick={() => setEditing(true)}>{icon("edit")}Editar OS</button></footer>}
+    </section></div>}
+  </div>;
+}
