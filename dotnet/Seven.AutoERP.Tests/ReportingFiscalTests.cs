@@ -4,6 +4,7 @@ using Seven.AutoERP.Fiscal;
 using Seven.AutoERP.Fiscal.NFe;
 using Seven.AutoERP.Fiscal.NFSe;
 using Seven.AutoERP.Reporting;
+using Xunit;
 
 namespace Seven.AutoERP.Tests;
 
@@ -30,7 +31,9 @@ public sealed class ReportingFiscalTests
             var result = await new ReportingEngine().RenderPdfAsync(new RenderDocumentRequest { TemplateName="Teste", Definition=definition, Data=json.RootElement.Clone(), OutputPath=output });
             Assert.True(result.Success);
             Assert.True(result.Bytes > 1000);
-            Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(output), 0, 4));
+            var bytes = await File.ReadAllBytesAsync(output);
+            Assert.True(bytes.Length >= 4);
+            Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
         }
         finally { try { File.Delete(output); } catch { } }
     }
