@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import SevenErpApp from "./seven-erp-app";
-import ServiceOrdersModuleV5 from "./service-orders-module-v5";
+import ServiceOrdersModuleV6 from "./service-orders-module-v6";
 import OsTemplateDesigner from "./os-template-designer";
 import ProductsModule from "./products-module";
 import IntegrationsModuleV7 from "./integrations-module-v7";
@@ -16,6 +16,7 @@ import "./os-studio.css";
 import "./catalog-studio.css";
 import "./nfe-mirror.css";
 import "./nfe-classic.css";
+import "./os-preview.css";
 
 type EnhancedModule = "service" | "osDesigner" | "catalog" | "integrations" | "dfe" | "devices" | "company" | null;
 
@@ -61,7 +62,7 @@ export default function SevenErpShell() {
     <NfeMirrorCenter />
     {!enhancedModule && <button className="company-nav-shortcut" onClick={() => setEnhancedModule("company")}><span>🏢</span><div><strong>Cadastro da empresa</strong><small>Dados fiscais e cadastrais</small></div></button>}
     {enhancedModule && <div className={`seven-enhancement-overlay ${theme}`}>
-      {enhancedModule === "service" ? <ServiceOrdersModuleV5 onClose={() => setEnhancedModule(null)} onOpenDesigner={() => setEnhancedModule("osDesigner")} onOpenCatalog={() => setEnhancedModule("catalog")} />
+      {enhancedModule === "service" ? <ServiceOrdersModuleV6 onClose={() => setEnhancedModule(null)} onOpenDesigner={() => setEnhancedModule("osDesigner")} onOpenCatalog={() => setEnhancedModule("catalog")} />
         : enhancedModule === "osDesigner" ? <OsTemplateDesigner onClose={() => setEnhancedModule("service")} />
         : enhancedModule === "catalog" ? <ProductsModule onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} />
