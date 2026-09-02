@@ -10,6 +10,7 @@ import DfeReceivedModule from "./dfe-received-module";
 import MeshDevicesModule from "./mesh-devices-module";
 import CompanyModule from "./company-module";
 import NfeMirrorCenter from "./nfe-mirror-center";
+import NfeIndividualMirrorActions from "./nfe-individual-mirror-actions";
 import NfeClassicModule from "./nfe-classic-module";
 import "./erp-enhancements.css";
 import "./erp-professional.css";
@@ -61,6 +62,7 @@ export default function SevenErpShell() {
   return <div className="seven-erp-shell">
     <SevenErpApp />
     <NfeMirrorCenter />
+    <NfeIndividualMirrorActions />
     {!enhancedModule && <button className="company-nav-shortcut" onClick={() => setEnhancedModule("company")}><span>🏢</span><div><strong>Cadastro da empresa</strong><small>Dados fiscais e cadastrais</small></div></button>}
     {enhancedModule && <div className={`seven-enhancement-overlay ${theme}`}>
       {enhancedModule === "service" ? <ServiceOrdersModuleV6 onClose={() => setEnhancedModule(null)} onOpenDesigner={() => setEnhancedModule("osDesigner")} onOpenCatalog={() => setEnhancedModule("catalog")} />
