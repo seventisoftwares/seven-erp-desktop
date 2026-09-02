@@ -5,6 +5,7 @@ import SevenErpApp from "./seven-erp-app";
 import ServiceOrdersModuleV6 from "./service-orders-module-v6";
 import OsTemplateDesigner from "./os-template-designer";
 import DocumentTemplateDesigner from "./document-template-designer";
+import FiscalSettingsModule from "./fiscal-settings-module";
 import ProductsModuleV2 from "./products-module-v2";
 import IntegrationsModuleV7 from "./integrations-module-v7";
 import DfeReceivedModule from "./dfe-received-module";
@@ -24,7 +25,7 @@ import "./nfe-classic.css";
 import "./nfe-classic-route.css";
 import "./os-preview.css";
 
-type EnhancedModule = "service" | "osDesigner" | "documents" | "catalog" | "integrations" | "dfe" | "devices" | "company" | "nfe" | null;
+type EnhancedModule = "service" | "osDesigner" | "documents" | "fiscalSettings" | "catalog" | "integrations" | "dfe" | "devices" | "company" | "nfe" | null;
 
 export default function SevenErpShell() {
   const [enhancedModule, setEnhancedModule] = useState<EnhancedModule>(null);
@@ -37,6 +38,7 @@ export default function SevenErpShell() {
       if (button.closest(".seven-enhancement-overlay")) return;
       const label = (button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
       if (label.includes("modelos de documentos") || label.includes("designer de documentos")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("documents"); return; }
+      if (label.includes("configurações nf-e") || label.includes("configuracoes nf-e") || label.includes("configurações nfce") || label.includes("configuracoes nfce") || label.includes("configurações nfs-e") || label.includes("configuracoes nfs-e") || label.includes("configurações fiscais") || label.includes("configuracoes fiscais") || label === "danfe") { event.preventDefault(); event.stopPropagation(); setEnhancedModule("fiscalSettings"); return; }
       if (label.includes("emissão de nf-e") || label.includes("emissao de nf-e")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("nfe"); return; }
       if (label.includes("integrações e ajustes")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("integrations"); return; }
       if (label.includes("manifestação nf-e") || label.includes("manifestacao nf-e")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("dfe"); return; }
@@ -58,6 +60,7 @@ export default function SevenErpShell() {
     : enhancedModule === "service" ? "theme-service"
     : enhancedModule === "osDesigner" ? "theme-os-studio"
     : enhancedModule === "documents" ? "theme-document-studio"
+    : enhancedModule === "fiscalSettings" ? "theme-fiscal-settings"
     : enhancedModule === "catalog" ? "theme-catalog"
     : enhancedModule === "nfe" ? "theme-nfe-classic"
     : "";
@@ -66,11 +69,16 @@ export default function SevenErpShell() {
     <SevenErpApp />
     <NfeMirrorCenter />
     <NfeIndividualMirrorActions />
-    {!enhancedModule && <button className="company-nav-shortcut" onClick={() => setEnhancedModule("company")}><span>🏢</span><div><strong>Cadastro da empresa</strong><small>Dados fiscais e cadastrais</small></div></button>}
+    {!enhancedModule && <div className="seven-config-shortcuts">
+      <button onClick={() => setEnhancedModule("documents")}><span>▤</span><div><strong>Modelos de Documentos</strong><small>Configurações · relatórios e impressão</small></div></button>
+      <button onClick={() => setEnhancedModule("fiscalSettings")}><span>⚙</span><div><strong>Configurações Fiscais</strong><small>NF-e · NFC-e · NFS-e · DANFE</small></div></button>
+      <button onClick={() => setEnhancedModule("company")}><span>🏢</span><div><strong>Cadastro da empresa</strong><small>Dados fiscais e cadastrais</small></div></button>
+    </div>}
     {enhancedModule && <div className={`seven-enhancement-overlay ${theme}`}>
       {enhancedModule === "service" ? <ServiceOrdersModuleV6 onClose={() => setEnhancedModule(null)} onOpenDesigner={() => setEnhancedModule("documents")} onOpenCatalog={() => setEnhancedModule("catalog")} />
         : enhancedModule === "osDesigner" ? <OsTemplateDesigner onClose={() => setEnhancedModule("service")} />
         : enhancedModule === "documents" ? <DocumentTemplateDesigner onClose={() => setEnhancedModule(null)} />
+        : enhancedModule === "fiscalSettings" ? <FiscalSettingsModule onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "catalog" ? <ProductsModuleV2 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} />
