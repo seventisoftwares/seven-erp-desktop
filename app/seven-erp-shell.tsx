@@ -8,9 +8,11 @@ import IntegrationsModuleV7 from "./integrations-module-v7";
 import DfeReceivedModule from "./dfe-received-module";
 import MeshDevicesModule from "./mesh-devices-module";
 import CompanyModule from "./company-module";
+import NfeMirrorCenter from "./nfe-mirror-center";
 import "./erp-enhancements.css";
 import "./erp-professional.css";
 import "./os-studio.css";
+import "./nfe-mirror.css";
 
 type EnhancedModule = "service" | "osDesigner" | "integrations" | "dfe" | "devices" | "company" | null;
 
@@ -39,6 +41,7 @@ export default function SevenErpShell() {
 
   return <div className="seven-erp-shell">
     <SevenErpApp />
+    <NfeMirrorCenter />
     {!enhancedModule && <button className="company-nav-shortcut" onClick={() => setEnhancedModule("company")}><span>🏢</span><div><strong>Cadastro da empresa</strong><small>Dados fiscais e cadastrais</small></div></button>}
     {enhancedModule && <div className={`seven-enhancement-overlay ${theme}`}>
       {enhancedModule === "service" ? <ServiceOrdersModuleV4 onClose={() => setEnhancedModule(null)} onOpenDesigner={() => setEnhancedModule("osDesigner")} />
