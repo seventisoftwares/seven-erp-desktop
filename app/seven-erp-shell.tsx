@@ -24,6 +24,7 @@ import "./nfe-sefaz-mirror.css";
 import "./nfe-classic.css";
 import "./nfe-classic-route.css";
 import "./os-preview.css";
+import "./platform-shortcuts.css";
 
 type EnhancedModule = "service" | "osDesigner" | "documents" | "fiscalSettings" | "catalog" | "integrations" | "dfe" | "devices" | "company" | "nfe" | null;
 
