@@ -10,6 +10,7 @@ import DfeReceivedModule from "./dfe-received-module";
 import MeshDevicesModule from "./mesh-devices-module";
 import CompanyModule from "./company-module";
 import NfeMirrorCenter from "./nfe-mirror-center";
+import NfeClassicModule from "./nfe-classic-module";
 import "./erp-enhancements.css";
 import "./erp-professional.css";
 import "./os-studio.css";
@@ -18,7 +19,7 @@ import "./nfe-mirror.css";
 import "./nfe-classic.css";
 import "./os-preview.css";
 
-type EnhancedModule = "service" | "osDesigner" | "catalog" | "integrations" | "dfe" | "devices" | "company" | null;
+type EnhancedModule = "service" | "osDesigner" | "catalog" | "integrations" | "dfe" | "devices" | "company" | "nfe" | null;
 
 export default function SevenErpShell() {
   const [enhancedModule, setEnhancedModule] = useState<EnhancedModule>(null);
@@ -35,6 +36,7 @@ export default function SevenErpShell() {
       if (button.closest(".seven-enhancement-overlay")) return;
 
       const label = (button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      if (label.includes("emissão de nf-e") || label.includes("emissao de nf-e")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("nfe"); return; }
       if (label.includes("integrações e ajustes")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("integrations"); return; }
       if (label.includes("manifestação nf-e") || label.includes("manifestacao nf-e")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("dfe"); return; }
       if (label.includes("designer de os") || label.includes("modelos de os") || label.includes("modelos de ordem")) { event.preventDefault(); event.stopPropagation(); setEnhancedModule("osDesigner"); return; }
@@ -55,6 +57,7 @@ export default function SevenErpShell() {
     : enhancedModule === "service" ? "theme-service"
     : enhancedModule === "osDesigner" ? "theme-os-studio"
     : enhancedModule === "catalog" ? "theme-catalog"
+    : enhancedModule === "nfe" ? "theme-nfe-classic"
     : "";
 
   return <div className="seven-erp-shell">
@@ -68,6 +71,7 @@ export default function SevenErpShell() {
         : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} />
         : enhancedModule === "company" ? <CompanyModule onClose={() => setEnhancedModule(null)} />
+        : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor Clássico NF-e</strong><span>Modelo 55 · clientes e produtos cadastrados · DANFE clássico</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeClassicModule /></div>
         : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
     </div>}
   </div>;
