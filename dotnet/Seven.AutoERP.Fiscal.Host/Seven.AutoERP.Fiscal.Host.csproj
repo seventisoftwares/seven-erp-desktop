@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishSingleFile>false</PublishSingleFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Seven.AutoERP.Contracts\Seven.AutoERP.Contracts.csproj" />
+    <ProjectReference Include="..\Seven.AutoERP.Reporting\Seven.AutoERP.Reporting.csproj" />
+    <ProjectReference Include="..\Seven.AutoERP.Fiscal\Seven.AutoERP.Fiscal.csproj" />
+    <ProjectReference Include="..\Seven.AutoERP.Fiscal.NFe\Seven.AutoERP.Fiscal.NFe.csproj" />
+    <ProjectReference Include="..\Seven.AutoERP.Fiscal.NFCe\Seven.AutoERP.Fiscal.NFCe.csproj" />
+    <ProjectReference Include="..\Seven.AutoERP.Fiscal.CTe\Seven.AutoERP.Fiscal.CTe.csproj" />
+    <ProjectReference Include="..\Seven.AutoERP.Fiscal.MDFe\Seven.AutoERP.Fiscal.MDFe.csproj" />
+    <ProjectReference Include="..\Seven.AutoERP.Fiscal.NFSe\Seven.AutoERP.Fiscal.NFSe.csproj" />
+    <ProjectReference Include="..\Seven.AutoERP.Fiscal.Danfe\Seven.AutoERP.Fiscal.Danfe.csproj" />
+  </ItemGroup>
+</Project>
