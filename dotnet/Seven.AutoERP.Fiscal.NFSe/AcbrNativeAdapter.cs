@@ -61,6 +61,7 @@ internal sealed class AcbrNativeAdapter : IDisposable
         var configPath = configuration.AcbrIniPath ?? "";
         var code = _initialize(ref _handle, configPath, "");
         if (code != 0) throw AcbrException("NFSE_Inicializar", code);
+        if (_handle == IntPtr.Zero) throw new InvalidOperationException("A ACBrLibNFSe inicializou sem retornar um handle válido.");
         _initialized = true;
         Configure(configuration);
     }
@@ -93,16 +94,17 @@ internal sealed class AcbrNativeAdapter : IDisposable
         var ini = ExtractCustomIni(request) ?? BuildGenericIni(configuration, request);
         Check(_loadIni(_handle, ini), "NFSE_CarregarINI");
         var batch = string.IsNullOrWhiteSpace(request.ExternalId) ? DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture) : DigitsOrHash(request.ExternalId);
-        var response = InvokeString((buffer, ref int size) => _emit(_handle, batch, 0, false, buffer, ref size));
+        var response = InvokeString((IntPtr buffer, ref int size) => _emit(_handle, batch, 0, false, buffer, ref size));
         return ResultFromResponse("issued", response, Version);
     }
 
     public FiscalOperationResult Query(string key)
     {
         EnsureInitialized();
+        if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Informe a chave ou número da NFS-e para consulta.");
         string response;
-        if (_queryByKey is not null) response = InvokeString((buffer, ref int size) => _queryByKey(_handle, key, buffer, ref size));
-        else if (_queryByNumber is not null) response = InvokeString((buffer, ref int size) => _queryByNumber(_handle, key, 1, buffer, ref size));
+        if (_queryByKey is not null) response = InvokeString((IntPtr buffer, ref int size) => _queryByKey(_handle, key, buffer, ref size));
+        else if (_queryByNumber is not null) response = InvokeString((IntPtr buffer, ref int size) => _queryByNumber(_handle, key, 1, buffer, ref size));
         else throw new MissingMethodException("A ACBrLibNFSe compilada não exporta consulta por chave/número.");
         return ResultFromResponse("queried", response, Version);
     }
@@ -110,9 +112,10 @@ internal sealed class AcbrNativeAdapter : IDisposable
     public FiscalOperationResult Cancel(string key, string justification)
     {
         EnsureInitialized();
+        if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Informe o número/chave da NFS-e para cancelamento.");
         if (string.IsNullOrWhiteSpace(justification) || justification.Trim().Length < 5) throw new InvalidOperationException("Informe justificativa de cancelamento.");
         var info = $"[Cancelamento]\nNumeroNFSe={Ini(key)}\nMotivoCancelamento={Ini(justification)}\n";
-        var response = InvokeString((buffer, ref int size) => _cancel(_handle, info, buffer, ref size));
+        var response = InvokeString((IntPtr buffer, ref int size) => _cancel(_handle, info, buffer, ref size));
         return ResultFromResponse("cancelled", response, Version);
     }
 
@@ -125,6 +128,10 @@ internal sealed class AcbrNativeAdapter : IDisposable
 
     private static string BuildGenericIni(NfseConfiguration config, NfseRequest request)
     {
+        if (request.Amount <= 0) throw new InvalidOperationException("Valor do serviço deve ser maior que zero.");
+        if (string.IsNullOrWhiteSpace(request.ServiceCode)) throw new InvalidOperationException("Código do serviço é obrigatório.");
+        if (string.IsNullOrWhiteSpace(config.TaxId) || string.IsNullOrWhiteSpace(config.MunicipalityCode)) throw new InvalidOperationException("CNPJ e código do município do prestador são obrigatórios.");
+
         var rps = string.IsNullOrWhiteSpace(request.RpsNumber) ? DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture) : request.RpsNumber;
         var now = DateTimeOffset.Now;
         var withheld = request.IssWithheld ? "1" : "2";
@@ -144,7 +151,8 @@ internal sealed class AcbrNativeAdapter : IDisposable
     {
         var digits = new string(value.Where(char.IsDigit).Take(14).ToArray());
         if (digits.Length > 0) return digits;
-        return Math.Abs(StringComparer.Ordinal.GetHashCode(value)).ToString(CultureInfo.InvariantCulture);
+        var hash = unchecked((uint)StringComparer.Ordinal.GetHashCode(value));
+        return hash.ToString(CultureInfo.InvariantCulture);
     }
 
     private FiscalOperationResult ResultFromResponse(string successStatus, string response, string engine)
@@ -157,7 +165,7 @@ internal sealed class AcbrNativeAdapter : IDisposable
     }
 
     private delegate int BufferCall(IntPtr buffer, ref int size);
-    private string InvokeString(StringOutDelegate function) => InvokeString((buffer, ref int size) => function(_handle, buffer, ref size));
+    private string InvokeString(StringOutDelegate function) => InvokeString((IntPtr buffer, ref int size) => function(_handle, buffer, ref size));
     private string InvokeString(BufferCall call)
     {
         var size = 8192;
@@ -166,13 +174,15 @@ internal sealed class AcbrNativeAdapter : IDisposable
             var buffer = Marshal.AllocHGlobal(size);
             try
             {
-                Span<byte> zero = new(buffer.ToPointer(), size); zero.Clear();
+                Marshal.Copy(new byte[size], 0, buffer, size);
                 var requested = size;
                 var code = call(buffer, ref requested);
                 if (code == 0)
                 {
                     var actual = Math.Clamp(requested, 0, size - 1);
-                    var bytes = new byte[actual]; Marshal.Copy(buffer, bytes, 0, actual);
+                    if (actual == 0) return string.Empty;
+                    var bytes = new byte[actual];
+                    Marshal.Copy(buffer, bytes, 0, actual);
                     return Encoding.UTF8.GetString(bytes).TrimEnd('\0', '\r', '\n');
                 }
                 if (requested > size && requested < 16 * 1024 * 1024) { size = requested + 1; continue; }
@@ -192,6 +202,7 @@ internal sealed class AcbrNativeAdapter : IDisposable
         }
         return new InvalidOperationException($"{operation} falhou na ACBrLib (código {code}). {SecretRedaction.Redact(detail)}".Trim());
     }
+
     private void Check(int code, string operation) { if (code != 0) throw AcbrException(operation, code); }
     private void EnsureInitialized() { if (!_initialized || _handle == IntPtr.Zero) throw new InvalidOperationException("ACBrLibNFSe não inicializada."); }
     private T Get<T>(string export) where T : Delegate => Marshal.GetDelegateForFunctionPointer<T>(NativeLibrary.GetExport(_library, export));
