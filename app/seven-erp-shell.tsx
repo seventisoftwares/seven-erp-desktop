@@ -30,6 +30,7 @@ import "./os-preview.css";
 import "./platform-shortcuts.css";
 import "./nfe-polish-v1.0.7.css";
 import "./nfe-polish-v1.0.8.css";
+import "./nfe-modern-v1.1.0.css";
 import "./company-establishments.css";
 
 type EnhancedModule = "service" | "osDesigner" | "documents" | "fiscalSettings" | "catalog" | "integrations" | "dfe" | "devices" | "company" | "nfe" | null;
@@ -61,12 +62,12 @@ export default function SevenErpShell() {
     <button className="company-nav-shortcut no-print" onClick={() => setEnhancedModule("company")} aria-label="Abrir Empresa e Filiais">
       <b>🏢</b><span><strong>Empresa e Filiais</strong><small>Matriz, filiais e emitente fiscal</small></span>
     </button>
-    <div className="seven-platform-ribbon no-print" role="navigation" aria-label="Módulos profissionais Seven ERP 1.0.9">
-      <div className="seven-platform-build"><strong>Seven ERP 1.0.9</strong><span>EMPRESA + FILIAIS VISÍVEL · NF-e FULL A4</span></div>
+    <div className="seven-platform-ribbon no-print" role="navigation" aria-label="Módulos profissionais Seven ERP 1.1.0">
+      <div className="seven-platform-build"><strong>Seven ERP 1.1.0</strong><span>NF-e MODERNA · EMPRESA + FILIAIS · DANFE A4</span></div>
       <button onClick={() => setEnhancedModule("company")}><b>🏢</b><span>Empresa / Filiais</span></button><button onClick={() => setEnhancedModule("documents")}><b>▤</b><span>Modelos</span></button><button onClick={() => setEnhancedModule("fiscalSettings")}><b>⚙</b><span>Fiscal</span></button><button onClick={() => setEnhancedModule("nfe")}><b>NF</b><span>Emissor NF-e</span></button><button onClick={() => setEnhancedModule("catalog")}><b>▦</b><span>Produtos / Veículos</span></button><button onClick={() => setEnhancedModule("service")}><b>OS</b><span>Ordens de Serviço</span></button>
     </div>
     {enhancedModule && <div className={`seven-enhancement-overlay ${theme}`}>
-      {enhancedModule === "service" ? <ServiceOrdersModuleV6 onClose={() => setEnhancedModule(null)} onOpenDesigner={() => setEnhancedModule("documents")} onOpenCatalog={() => setEnhancedModule("catalog")} /> : enhancedModule === "osDesigner" ? <OsTemplateDesigner onClose={() => setEnhancedModule("service")} /> : enhancedModule === "documents" ? <DocumentTemplateDesigner onClose={() => setEnhancedModule(null)} /> : enhancedModule === "fiscalSettings" ? <FiscalSettingsModule onClose={() => setEnhancedModule(null)} /> : enhancedModule === "catalog" ? <ProductsModuleV2 onClose={() => setEnhancedModule(null)} /> : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} /> : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} /> : enhancedModule === "company" ? <CompanyEstablishmentsModule onClose={() => setEnhancedModule(null)} /> : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor NF-e Profissional · Seven ERP 1.0.9</strong><span>Modelo 55 · estabelecimento ativo · diagnóstico fiscal · DANFE A4 preenchido · XML autorizado preservado</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeProfessionalModule /></div> : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
+      {enhancedModule === "service" ? <ServiceOrdersModuleV6 onClose={() => setEnhancedModule(null)} onOpenDesigner={() => setEnhancedModule("documents")} onOpenCatalog={() => setEnhancedModule("catalog")} /> : enhancedModule === "osDesigner" ? <OsTemplateDesigner onClose={() => setEnhancedModule("service")} /> : enhancedModule === "documents" ? <DocumentTemplateDesigner onClose={() => setEnhancedModule(null)} /> : enhancedModule === "fiscalSettings" ? <FiscalSettingsModule onClose={() => setEnhancedModule(null)} /> : enhancedModule === "catalog" ? <ProductsModuleV2 onClose={() => setEnhancedModule(null)} /> : enhancedModule === "integrations" ? <IntegrationsModuleV7 onClose={() => setEnhancedModule(null)} /> : enhancedModule === "dfe" ? <DfeReceivedModule onClose={() => setEnhancedModule(null)} /> : enhancedModule === "company" ? <CompanyEstablishmentsModule onClose={() => setEnhancedModule(null)} /> : enhancedModule === "nfe" ? <div className="nfe-classic-real-shell"><div className="nfe-classic-real-banner"><div><strong>Emissor NF-e · Seven ERP 1.1.0</strong><span>Interface moderna · modelo 55 · estabelecimento ativo · motor fiscal e XML autorizado preservados</span></div><button className="classic-button" onClick={() => setEnhancedModule(null)}>Fechar</button></div><NfeProfessionalModule /></div> : <MeshDevicesModule onClose={() => setEnhancedModule(null)} />}
     </div>}
   </div>;
 }
