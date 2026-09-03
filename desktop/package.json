@@ -1,6 +1,6 @@
 {
   "name": "seven-erp-desktop",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Seven ERP Desktop local-first com sincronização direta Seven Mesh",
   "author": "Seven TI Tecnologia & Serviços LTDA",
@@ -11,7 +11,7 @@
     "dev": "vite",
     "test:local-core": "node scripts/smoke-local-core.mjs",
     "test:fiscal": "node --test tests/*.test.mjs",
-    "test:syntax": "node --check src/main-platform.mjs && node --check src/platform-bootstrap.mjs && node --check src/company-establishment-bootstrap.mjs && node --check src/company-establishment-store.mjs && node --check src/dotnet-sidecar.mjs && node --check src/document-template-store.mjs && node --check src/main.mjs && node --check src/preload.mjs && node --check src/nfe-service.mjs && node --check src/nfe-events.mjs && node --check src/nfe-danfe.mjs && node --check src/nfe-danfe-reference.mjs && node --check src/nfe-danfe-reference-fit.mjs",
+    "test:syntax": "node --check src/main-platform.mjs && node --check src/platform-bootstrap.mjs && node --check src/company-establishment-bootstrap.mjs && node --check src/company-logo-bootstrap.mjs && node --check src/company-establishment-store.mjs && node --check src/dotnet-sidecar.mjs && node --check src/document-template-store.mjs && node --check src/main.mjs && node --check src/preload.mjs && node --check src/nfe-service.mjs && node --check src/nfe-events.mjs && node --check src/nfe-danfe.mjs && node --check src/nfe-danfe-reference.mjs && node --check src/nfe-danfe-reference-fit.mjs",
     "test:prebuild": "npm run test:syntax && npm run test:local-core && npm run test:fiscal",
     "test:dotnet": "dotnet test ../dotnet/Seven.AutoERP.Tests/Seven.AutoERP.Tests.csproj -c Release --nologo",
     "build:renderer": "vite build",
