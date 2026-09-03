@@ -14,9 +14,9 @@ export function createCompanyEstablishmentStore({ dataDir }) {
   async function readState() {
     try {
       const parsed = JSON.parse(await readFile(file, "utf8"));
-      return { version: 1, activeId: "matrix", branches: [], ...parsed, branches: Array.isArray(parsed?.branches) ? parsed.branches : [] };
+      return { version: 1, activeId: "matrix", matrixSnapshot: null, branches: [], ...parsed, branches: Array.isArray(parsed?.branches) ? parsed.branches : [] };
     } catch {
-      return { version: 1, activeId: "matrix", branches: [], updatedAt: null };
+      return { version: 1, activeId: "matrix", matrixSnapshot: null, branches: [], updatedAt: null };
     }
   }
 
@@ -31,19 +31,15 @@ export function createCompanyEstablishmentStore({ dataDir }) {
     return {
       id: text(input.id) || previous?.id || randomUUID(),
       code: text(input.code).slice(0, 20),
-      legalName: text(input.legalName),
-      tradeName: text(input.tradeName),
-      taxId: normalizeCnpj(input.taxId),
-      stateRegistration: text(input.stateRegistration),
-      municipalRegistration: text(input.municipalRegistration),
-      taxRegime: text(input.taxRegime) || "simples_nacional",
-      cnae: text(input.cnae),
+      legalName: text(input.legalName), tradeName: text(input.tradeName), taxId: normalizeCnpj(input.taxId),
+      stateRegistration: text(input.stateRegistration), municipalRegistration: text(input.municipalRegistration),
+      taxRegime: text(input.taxRegime) || "simples_nacional", cnae: text(input.cnae),
       postalCode: digits(input.postalCode), street: text(input.street), number: text(input.number), complement: text(input.complement),
       district: text(input.district), city: text(input.city), cityCode: digits(input.cityCode), state: text(input.state).toUpperCase(),
       email: text(input.email).toLowerCase(), phone: text(input.phone), invoiceEmail: text(input.invoiceEmail).toLowerCase(),
       nfeSeries: digits(input.nfeSeries) || "1", nfeNextNumber: digits(input.nfeNextNumber), nfceSeries: digits(input.nfceSeries) || "1",
-      status: input.status === "inactive" ? "inactive" : "active",
-      notes: text(input.notes), createdAt: previous?.createdAt || now(), updatedAt: now(),
+      status: input.status === "inactive" ? "inactive" : "active", notes: text(input.notes),
+      createdAt: previous?.createdAt || now(), updatedAt: now(),
     };
   }
 
@@ -55,7 +51,7 @@ export function createCompanyEstablishmentStore({ dataDir }) {
     if (branch.cityCode && branch.cityCode.length !== 7) errors.push("Código IBGE da filial deve ter 7 dígitos.");
     if (Number(branch.nfeSeries) > 999) errors.push("Série NF-e da filial deve estar entre 0 e 999.");
     if (branch.nfeNextNumber && (Number(branch.nfeNextNumber) < 1 || Number(branch.nfeNextNumber) > 999999999)) errors.push("Próximo número NF-e da filial deve estar entre 1 e 999999999.");
-    const matrixTaxId = normalizeCnpj(matrix?.taxId);
+    const matrixTaxId = normalizeCnpj(matrix?.taxId || state.matrixSnapshot?.taxId);
     if (matrixTaxId && branch.taxId === matrixTaxId) errors.push("A filial não pode usar o mesmo CNPJ da matriz.");
     if (state.branches.some((item) => item.id !== branch.id && normalizeCnpj(item.taxId) === branch.taxId)) errors.push("Já existe outra filial com este CNPJ.");
     if (branch.code && state.branches.some((item) => item.id !== branch.id && text(item.code).toUpperCase() === branch.code.toUpperCase())) errors.push("Já existe outra filial com este código interno.");
@@ -64,25 +60,25 @@ export function createCompanyEstablishmentStore({ dataDir }) {
 
   async function resolve(matrix = {}) {
     const state = await readState();
-    if (!state.activeId || state.activeId === "matrix") return { ...matrix, establishmentId: "matrix", establishmentType: "matrix", matrixTaxId: matrix?.taxId || "" };
+    const matrixBase = state.matrixSnapshot || matrix || {};
+    if (!state.activeId || state.activeId === "matrix") return { ...matrixBase, establishmentId: "matrix", establishmentType: "matrix", matrixTaxId: matrixBase?.taxId || "" };
     const branch = state.branches.find((item) => item.id === state.activeId && item.status !== "inactive");
-    if (!branch) return { ...matrix, establishmentId: "matrix", establishmentType: "matrix", matrixTaxId: matrix?.taxId || "" };
-    return {
-      ...matrix,
-      ...branch,
-      establishmentId: branch.id,
-      establishmentType: "branch",
-      matrixLegalName: matrix?.legalName || "",
-      matrixTaxId: matrix?.taxId || "",
-      branches: undefined,
-    };
+    if (!branch) return { ...matrixBase, establishmentId: "matrix", establishmentType: "matrix", matrixTaxId: matrixBase?.taxId || "" };
+    return { ...matrixBase, ...branch, establishmentId: branch.id, establishmentType: "branch", matrixLegalName: matrixBase?.legalName || "", matrixTaxId: matrixBase?.taxId || "" };
   }
 
   async function api(method, payload = {}, matrix = {}) {
     const state = await readState();
-    if (method === "GET") return jsonResponse(200, { activeId: state.activeId || "matrix", branches: state.branches, activeEstablishment: await resolve(matrix), local: true });
+    if (method === "GET") return jsonResponse(200, { activeId: state.activeId || "matrix", matrixSnapshot: state.matrixSnapshot, branches: state.branches, activeEstablishment: await resolve(matrix), local: true });
     if (method !== "POST") return jsonResponse(405, { error: "Método não permitido." });
     const action = text(payload.action);
+    if (action === "capture_matrix") {
+      const source = payload.matrix && typeof payload.matrix === "object" ? payload.matrix : matrix;
+      if (!source?.legalName || !validateCnpj(normalizeCnpj(source?.taxId))) return jsonResponse(422, { error: "Cadastre a matriz corretamente antes de ativar uma filial." });
+      state.matrixSnapshot = { ...source, taxId: normalizeCnpj(source.taxId), capturedAt: now() };
+      await writeState(state);
+      return jsonResponse(200, { captured: true, matrixSnapshot: state.matrixSnapshot, local: true });
+    }
     if (action === "save_branch") {
       const previous = state.branches.find((item) => item.id === text(payload.branch?.id)) || null;
       const branch = normalizeBranch(payload.branch || {}, previous);
@@ -97,8 +93,8 @@ export function createCompanyEstablishmentStore({ dataDir }) {
       const id = text(payload.id);
       const existing = state.branches.find((item) => item.id === id);
       if (!existing) return jsonResponse(404, { error: "Filial não encontrada." });
+      if (state.activeId === id) return jsonResponse(409, { error: "Selecione a matriz ou outra filial antes de excluir a unidade ativa." });
       state.branches = state.branches.filter((item) => item.id !== id);
-      if (state.activeId === id) state.activeId = "matrix";
       await writeState(state);
       return jsonResponse(200, { deleted: true, id, activeId: state.activeId, branches: state.branches, local: true });
     }
@@ -108,10 +104,11 @@ export function createCompanyEstablishmentStore({ dataDir }) {
         const branch = state.branches.find((item) => item.id === id);
         if (!branch) return jsonResponse(404, { error: "Filial não encontrada." });
         if (branch.status === "inactive") return jsonResponse(409, { error: "Ative a filial antes de selecioná-la como estabelecimento fiscal." });
+        if (!state.matrixSnapshot) return jsonResponse(409, { error: "A matriz ainda não foi preservada. Capture a matriz antes de trocar de estabelecimento." });
       }
       state.activeId = id;
       await writeState(state);
-      return jsonResponse(200, { activeId: id, activeEstablishment: await resolve(matrix), local: true });
+      return jsonResponse(200, { activeId: id, activeEstablishment: await resolve(matrix), matrixSnapshot: state.matrixSnapshot, local: true });
     }
     return jsonResponse(400, { error: "Ação de estabelecimento não reconhecida." });
   }
