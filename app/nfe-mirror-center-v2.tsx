@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import NfeDanfeReferencePreview from "./nfe-danfe-reference-preview";
 
@@ -12,6 +12,13 @@ const readSnapshots = (): SnapshotMap => { try { return JSON.parse(localStorage.
 const saveSnapshot = (draftId: string, payload: AnyRow) => { if (!draftId || typeof localStorage === "undefined") return; const current = readSnapshots(); current[draftId] = { payload, savedAt: new Date().toISOString() }; localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(Object.entries(current).sort((a,b) => String(b[1].savedAt).localeCompare(String(a[1].savedAt))).slice(0,200)))); };
 const centsMoney = (value: unknown) => money.format((Number(value) || 0) / 100);
 
+function fitZoom() {
+  if (typeof window === "undefined") return 100;
+  const usable = Math.max(720, window.innerWidth - 80);
+  const pagePx = 794;
+  return Math.max(75, Math.min(125, Math.floor((usable / pagePx) * 100)));
+}
+
 export default function NfeMirrorCenterV2() {
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
   const [open, setOpen] = useState(false);
@@ -21,6 +28,8 @@ export default function NfeMirrorCenterV2() {
   const [snapshots, setSnapshots] = useState<SnapshotMap>({});
   const [selectedId, setSelectedId] = useState("");
   const [error, setError] = useState("");
+  const [zoom, setZoom] = useState(110);
+  const stageRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const syncTarget = () => setPortalTarget(document.querySelector(".nfe-workspace .module-heading .nfe-heading-actions"));
@@ -40,6 +49,11 @@ export default function NfeMirrorCenterV2() {
     window.fetch = wrappedFetch; return () => { if (window.fetch === wrappedFetch) window.fetch = previousFetch; };
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(() => stageRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+  }, [open, selectedId]);
+
   const load = async (preferredId = "") => {
     setLoading(true); setError("");
     try {
@@ -53,16 +67,21 @@ export default function NfeMirrorCenterV2() {
     finally { setLoading(false); }
   };
 
-  const openMirror = () => { setOpen(true); void load(); };
+  const openMirror = () => { setZoom(Math.min(115, fitZoom())); setOpen(true); void load(); };
   const selected = useMemo(() => drafts.find((draft) => draft.id === selectedId) || null, [drafts, selectedId]);
   const snapshot = selected ? snapshots[selected.id]?.payload : undefined;
   const launcher = portalTarget ? createPortal(<button type="button" className="outline-button nfe-mirror-launcher" onClick={openMirror}>▤ Espelho / DANFE</button>, portalTarget) : null;
+  const setSafeZoom = (value: number) => setZoom(Math.max(60, Math.min(150, value)));
 
   return <>{launcher}{open && <div className="nfe-mirror-overlay sefaz-mirror-mode" role="dialog" aria-modal="true" aria-label="Espelho da NF-e">
     <div className="nfe-mirror-topbar no-print">
-      <div><span>SEVEN ERP 1.0.6 · FISCAL</span><h2>Espelho NF-e · modelo convencional</h2><p>Layout A4 reconstruído no padrão do modelo de referência. Código de barras real quando existir chave e dados fiscais sem preenchimento inventado.</p></div>
-      <div className="nfe-mirror-controls"><label><span>Documento</span><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Selecione...</option>{drafts.map((draft) => <option key={draft.id} value={draft.id}>{draft.nfeNumber ? `NF-e ${String(draft.nfeNumber).padStart(9,"0")}` : "Rascunho"} · {draft.recipientName || "Sem destinatário"} · {draft.totalCents !== undefined ? centsMoney(draft.totalCents) : ""}</option>)}</select></label><button onClick={() => window.print()} disabled={!selected}>Imprimir / Salvar PDF do espelho</button><button className="mirror-close" onClick={() => setOpen(false)}>Fechar</button></div>
+      <div><span>SEVEN ERP 1.0.7 · FISCAL</span><h2>Espelho NF-e · modelo convencional</h2><p>Pré-visualização A4 com escala ajustável. O DANFE autorizado continua sendo gerado a partir do XML fiscal autorizado.</p></div>
+      <div className="nfe-mirror-controls">
+        <label><span>Documento</span><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Selecione...</option>{drafts.map((draft) => <option key={draft.id} value={draft.id}>{draft.nfeNumber ? `NF-e ${String(draft.nfeNumber).padStart(9,"0")}` : "Rascunho"} · {draft.recipientName || "Sem destinatário"} · {draft.totalCents !== undefined ? centsMoney(draft.totalCents) : ""}</option>)}</select></label>
+        <div className="mirror-zoom-group" aria-label="Zoom do documento"><button type="button" onClick={() => setSafeZoom(zoom - 10)}>−</button><span className="mirror-zoom-value">{zoom}%</span><button type="button" onClick={() => setSafeZoom(zoom + 10)}>+</button><button type="button" className={zoom === 100 ? "active" : ""} onClick={() => setZoom(100)}>100</button><button type="button" onClick={() => setSafeZoom(fitZoom())} title="Ajustar à largura">↔</button></div>
+        <button onClick={() => window.print()} disabled={!selected}>Imprimir / Salvar PDF</button><button className="mirror-close" onClick={() => setOpen(false)}>Fechar</button>
+      </div>
     </div>
-    <div className="nfe-mirror-stage">{error ? <div className="mirror-empty-state"><b>Não foi possível abrir o espelho</b><span>{error}</span></div> : loading ? <div className="mirror-empty-state"><b>Carregando...</b><span>Montando a folha A4.</span></div> : !selected ? <div className="mirror-empty-state"><b>Nenhuma NF-e disponível</b><span>Salve uma NF-e para visualizar.</span></div> : <><div className="mirror-snapshot-note no-print"><b>Modelo DANFE 1.0.6</b><span>{snapshot ? "Dados detalhados recuperados do snapshot individual desta NF-e." : "Campos sem dado persistido ficam em branco; o sistema não inventa informações fiscais."}</span></div><NfeDanfeReferencePreview draft={selected} company={company} snapshot={snapshot} /></>}</div>
+    <div className="nfe-mirror-stage" ref={stageRef}>{error ? <div className="mirror-empty-state"><b>Não foi possível abrir o espelho</b><span>{error}</span></div> : loading ? <div className="mirror-empty-state"><b>Carregando...</b><span>Montando a folha A4.</span></div> : !selected ? <div className="mirror-empty-state"><b>Nenhuma NF-e disponível</b><span>Salve uma NF-e para visualizar.</span></div> : <><div className="mirror-snapshot-note no-print"><b>Modelo DANFE 1.0.7</b><span>{snapshot ? "Dados detalhados recuperados do snapshot individual desta NF-e." : "Campos sem dado persistido ficam em branco; o sistema não inventa informações fiscais."}</span></div><div className="nfe-mirror-zoom-layer" style={{ zoom: zoom / 100 } as any}><NfeDanfeReferencePreview draft={selected} company={company} snapshot={snapshot} /></div></>}</div>
   </div>}</>;
 }
