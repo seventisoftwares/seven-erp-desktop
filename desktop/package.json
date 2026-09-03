@@ -1,6 +1,6 @@
 {
   "name": "seven-erp-desktop",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "private": true,
   "description": "Seven ERP Desktop local-first com sincronização direta Seven Mesh",
   "author": "Seven TI Tecnologia & Serviços LTDA",
@@ -11,7 +11,7 @@
     "dev": "vite",
     "test:local-core": "node scripts/smoke-local-core.mjs",
     "test:fiscal": "node --test tests/*.test.mjs",
-    "test:syntax": "node --check src/main-platform.mjs && node --check src/platform-bootstrap.mjs && node --check src/dotnet-sidecar.mjs && node --check src/document-template-store.mjs && node --check src/main.mjs && node --check src/preload.mjs && node --check src/nfe-service.mjs && node --check src/nfe-events.mjs && node --check src/nfe-danfe.mjs && node --check src/nfe-danfe-reference.mjs",
+    "test:syntax": "node --check src/main-platform.mjs && node --check src/platform-bootstrap.mjs && node --check src/company-establishment-bootstrap.mjs && node --check src/company-establishment-store.mjs && node --check src/dotnet-sidecar.mjs && node --check src/document-template-store.mjs && node --check src/main.mjs && node --check src/preload.mjs && node --check src/nfe-service.mjs && node --check src/nfe-events.mjs && node --check src/nfe-danfe.mjs && node --check src/nfe-danfe-reference.mjs && node --check src/nfe-danfe-reference-fit.mjs",
     "test:prebuild": "npm run test:syntax && npm run test:local-core && npm run test:fiscal",
     "test:dotnet": "dotnet test ../dotnet/Seven.AutoERP.Tests/Seven.AutoERP.Tests.csproj -c Release --nologo",
     "build:renderer": "vite build",
@@ -43,70 +43,14 @@
     "copyright": "Copyright © 2026 Seven TI Tecnologia & Serviços LTDA",
     "asar": true,
     "compression": "maximum",
-    "directories": {
-      "output": "release",
-      "buildResources": "build"
-    },
-    "files": [
-      "dist/**/*",
-      "src/**/*.mjs",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "sidecar",
-        "to": "sidecar",
-        "filter": ["**/*"]
-      }
-    ],
-    "extraMetadata": {
-      "main": "src/main-platform.mjs"
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        }
-      ],
-      "icon": "build/icon.ico",
-      "artifactName": "Seven-ERP-Setup-${version}-${arch}.${ext}",
-      "signtoolOptions": {
-        "publisherName": "Seven TI Tecnologia & Serviços LTDA"
-      }
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "Seven ERP",
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "license": "build/EULA.txt",
-      "deleteAppDataOnUninstall": false
-    },
-    "mac": {
-      "target": [
-        {
-          "target": "dmg",
-          "arch": ["universal"]
-        },
-        {
-          "target": "zip",
-          "arch": ["universal"]
-        }
-      ],
-      "icon": "build/icon.png",
-      "category": "public.app-category.business",
-      "hardenedRuntime": true,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist",
-      "artifactName": "Seven-ERP-${version}-${arch}.${ext}"
-    },
-    "dmg": {
-      "title": "Seven ERP ${version}"
-    },
+    "directories": { "output": "release", "buildResources": "build" },
+    "files": ["dist/**/*", "src/**/*.mjs", "package.json"],
+    "extraResources": [{ "from": "sidecar", "to": "sidecar", "filter": ["**/*"] }],
+    "extraMetadata": { "main": "src/main-platform.mjs" },
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "build/icon.ico", "artifactName": "Seven-ERP-Setup-${version}-${arch}.${ext}", "signtoolOptions": { "publisherName": "Seven TI Tecnologia & Serviços LTDA" } },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true, "shortcutName": "Seven ERP", "installerIcon": "build/icon.ico", "uninstallerIcon": "build/icon.ico", "license": "build/EULA.txt", "deleteAppDataOnUninstall": false },
+    "mac": { "target": [{ "target": "dmg", "arch": ["universal"] }, { "target": "zip", "arch": ["universal"] }], "icon": "build/icon.png", "category": "public.app-category.business", "hardenedRuntime": true, "entitlements": "build/entitlements.mac.plist", "entitlementsInherit": "build/entitlements.mac.plist", "artifactName": "Seven-ERP-${version}-${arch}.${ext}" },
+    "dmg": { "title": "Seven ERP ${version}" },
     "afterSign": "scripts/notarize.mjs"
   }
 }

@@ -11,88 +11,24 @@ const NFE_PROC = `<?xml version="1.0" encoding="UTF-8"?>
     <dest><CPF>52998224725</CPF><xNome>CLIENTE TESTE &amp; CIA</xNome><enderDest><xLgr>Rua Cliente</xLgr><nro>200</nro><xBairro>Centro</xBairro><xMun>Porto Alegre</xMun><UF>RS</UF><CEP>90000001</CEP></enderDest><indIEDest>9</indIEDest></dest>
     <det nItem="1"><prod><cProd>P001</cProd><xProd>Produto de Teste</xProd><NCM>84713012</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>2.0000</qCom><vUnCom>50.0000000000</vUnCom><vProd>100.00</vProd></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS></imposto><infAdProd>MARCA: SEVEN | SÉRIE: TESTE-001</infAdProd></det>
     <total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vProd>100.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vIPI>0.00</vIPI><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>100.00</vNF></ICMSTot><ISSQNtot><vServ>0.00</vServ><vBC>0.00</vBC><vISS>0.00</vISS></ISSQNtot></total>
-    <transp><modFrete>9</modFrete></transp>
-    <cobr><fat><nFat>001</nFat><vOrig>100.00</vOrig><vLiq>100.00</vLiq></fat></cobr>
-    <infAdic><infCpl>Pedido interno 123</infCpl></infAdic>
+    <transp><modFrete>9</modFrete></transp><cobr><fat><nFat>001</nFat><vOrig>100.00</vOrig><vLiq>100.00</vLiq></fat></cobr><infAdic><infCpl>Pedido interno 123</infCpl></infAdic>
   </infNFe></NFe>
   <protNFe versao="4.00"><infProt><tpAmb>2</tpAmb><chNFe>${ACCESS_KEY}</chNFe><dhRecbto>2026-09-01T10:00:05-03:00</dhRecbto><nProt>143260000000001</nProt><cStat>100</cStat><xMotivo>Autorizado o uso da NF-e</xMotivo></infProt></protNFe>
 </nfeProc>`;
 
-test("DANFE parser requires an authorized nfeProc and extracts fiscal data", () => {
-  const parsed = parseNfeProc(NFE_PROC);
-  assert.equal(parsed.accessKey, ACCESS_KEY);
-  assert.equal(parsed.number, "123");
-  assert.equal(parsed.series, "1");
-  assert.equal(parsed.environment, "homologation");
-  assert.equal(parsed.issuer.tradeName, "SEVEN TESTE");
-  assert.equal(parsed.recipient.name, "CLIENTE TESTE & CIA");
-  assert.equal(parsed.items.length, 1);
-  assert.equal(parsed.items[0].productValue, "100.00");
-  assert.equal(parsed.protocol, "143260000000001");
-});
+test("DANFE parser requires an authorized nfeProc and extracts fiscal data", () => { const parsed = parseNfeProc(NFE_PROC); assert.equal(parsed.accessKey, ACCESS_KEY); assert.equal(parsed.number, "123"); assert.equal(parsed.series, "1"); assert.equal(parsed.environment, "homologation"); assert.equal(parsed.issuer.tradeName, "SEVEN TESTE"); assert.equal(parsed.recipient.name, "CLIENTE TESTE & CIA"); assert.equal(parsed.items.length, 1); assert.equal(parsed.items[0].productValue, "100.00"); assert.equal(parsed.protocol, "143260000000001"); });
+test("DANFE parser rejects XML without authorization cStat 100", () => { assert.throws(() => parseNfeProc(NFE_PROC.replace("<cStat>100</cStat>", "<cStat>110</cStat>")), /cStat 100/); assert.throws(() => parseNfeProc("<NFe></NFe>"), /nfeProc autorizado/); });
+test("Code 128 encoder supports numeric/alphanumeric NF-e keys and produces SVG bars", () => { const numericCodes = encodeCode128(ACCESS_KEY); assert.equal(numericCodes[0], 105); assert.equal(numericCodes.at(-1), 106); const alphaKey = "43260912ABC34500DE35550010000001231000001234"; const alphaCodes = encodeCode128(alphaKey); assert.ok(alphaCodes.includes(100)); assert.ok(alphaCodes.includes(99)); const svg = code128Svg(alphaKey); assert.match(svg, /^<svg/); assert.match(svg, /<rect /); });
 
-test("DANFE parser rejects XML without authorization cStat 100", () => {
-  assert.throws(() => parseNfeProc(NFE_PROC.replace("<cStat>100</cStat>", "<cStat>110</cStat>")), /cStat 100/);
-  assert.throws(() => parseNfeProc("<NFe></NFe>"), /nfeProc autorizado/);
-});
-
-test("Code 128 encoder supports numeric/alphanumeric NF-e keys and produces SVG bars", () => {
-  const numericCodes = encodeCode128(ACCESS_KEY);
-  assert.equal(numericCodes[0], 105);
-  assert.equal(numericCodes.at(-1), 106);
-  const alphaKey = "43260912ABC34500DE35550010000001231000001234";
-  const alphaCodes = encodeCode128(alphaKey);
-  assert.ok(alphaCodes.includes(100));
-  assert.ok(alphaCodes.includes(99));
-  const svg = code128Svg(alphaKey);
-  assert.match(svg, /^<svg/);
-  assert.match(svg, /<rect /);
-});
-
-test("DANFE de referência reproduz a estrutura convencional A4 e usa dados do XML", () => {
-  const data = extractClassicData(NFE_PROC);
-  assert.equal(data.operationType, "1 - SAÍDA");
-  assert.equal(data.transport.mode, "9");
-  assert.equal(data.exit.d, "01/09/2026");
-  assert.ok(data.exit.t);
-  assert.equal(data.invoice.number, "001");
-  assert.equal(data.items[0].extra, "MARCA: SEVEN | SÉRIE: TESTE-001");
+test("DANFE de referência reproduz estrutura convencional e ocupa A4 com grade corrigida", () => {
+  const data = extractClassicData(NFE_PROC); assert.equal(data.operationType, "1 - SAÍDA"); assert.equal(data.transport.mode, "9"); assert.equal(data.exit.d, "01/09/2026"); assert.ok(data.exit.t); assert.equal(data.invoice.number, "001"); assert.equal(data.items[0].extra, "MARCA: SEVEN | SÉRIE: TESTE-001");
   const html = buildDanfeHtml({ nfeProcXml: NFE_PROC });
-  assert.match(html, /RECEBEMOS DE/i);
-  assert.match(html, /Identificação do emitente/i);
-  assert.match(html, /DANFE/);
-  assert.match(html, /CHAVE DE ACESSO DA NF-e/i);
-  assert.match(html, /DESTINATÁRIO \/ REMETENTE/i);
-  assert.match(html, /FATURA/i);
-  assert.match(html, /CÁLCULO DO IMPOSTO/i);
-  assert.match(html, /TRANSPORTADOR \/ VOLUMES TRANSPORTADOS/i);
-  assert.match(html, /DADOS DO PRODUTO \/ SERVIÇO/i);
-  assert.match(html, /CÁLCULO DO ISSQN/i);
-  assert.match(html, /DADOS ADICIONAIS/i);
-  assert.match(html, /RESERVADO AO FISCO/i);
-  assert.match(html, /SEM VALOR FISCAL/i);
-  assert.match(html, /HOMOLOGAÇÃO/i);
-  assert.match(html, /PROTOCOLO DE AUTORIZAÇÃO DE USO/i);
-  assert.match(html, /143260000000001/);
-  assert.match(html, /CLIENTE TESTE &amp; CIA/);
-  assert.match(html, /MARCA: SEVEN \| SÉRIE: TESTE-001/);
-  assert.match(html, /<svg[^>]*Código de barras da chave de acesso/i);
-  assert.match(html, /class="page"/);
-  assert.match(html, /Seven ERP/i);
+  for (const expected of [/RECEBEMOS DE/i,/Identificação do emitente/i,/DANFE/,/CHAVE DE ACESSO DA NF-e/i,/DESTINATÁRIO \/ REMETENTE/i,/FATURA/i,/CÁLCULO DO IMPOSTO/i,/TRANSPORTADOR \/ VOLUMES TRANSPORTADOS/i,/DADOS DO PRODUTO \/ SERVIÇO/i,/CÁLCULO DO ISSQN/i,/DADOS ADICIONAIS/i,/RESERVADO AO FISCO/i,/SEM VALOR FISCAL/i,/HOMOLOGAÇÃO/i,/PROTOCOLO DE AUTORIZAÇÃO DE USO/i,/143260000000001/,/CLIENTE TESTE &amp; CIA/,/MARCA: SEVEN \| SÉRIE: TESTE-001/,/<svg[^>]*Código de barras da chave de acesso/i,/class="page"/,/Seven ERP/i]) assert.match(html, expected);
+  assert.match(html, /\.page\{height:297mm;min-height:297mm!important/);
+  assert.match(html, /\.products\{min-height:55mm;flex:1 1 auto/);
+  assert.match(html, /\.products th:nth-child\(2\)\{width:30%\}/);
+  assert.match(html, /\.products th:nth-child\(14\)\{width:3\.5%\}/);
 });
 
-test("DANFE de referência marca cancelamento e protocolo do evento", () => {
-  const cancelled = buildDanfeHtml({ nfeProcXml: NFE_PROC, cancelled: true, cancellationProtocol: "143260000000099" });
-  assert.match(cancelled, /CANCELADA/);
-  assert.match(cancelled, /Protocolo do evento: 143260000000099/i);
-});
-
-test("DANFE de referência pagina automaticamente notas com muitos itens", () => {
-  const extraItems = Array.from({ length: 34 }, (_, index) => `<det nItem="${index + 2}"><prod><cProd>P${String(index + 2).padStart(3, "0")}</cProd><xProd>Produto adicional ${index + 2} com descrição suficiente para validar quebra de linha e paginação controlada</xProd><NCM>84713012</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>10.00</vProd></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS></imposto></det>`).join("");
-  const manyItemsXml = NFE_PROC.replace("    <total><ICMSTot>", `${extraItems}\n    <total><ICMSTot>`);
-  const html = buildDanfeHtml({ nfeProcXml: manyItemsXml });
-  assert.match(html, /FOLHA 01\/\d+/i);
-  assert.match(html, /FOLHA 02\/\d+/i);
-  assert.match(html, /Continuação dos produtos\/serviços/i);
-  assert.ok((html.match(/class="page"/g) || []).length >= 2);
-});
+test("DANFE de referência marca cancelamento e protocolo do evento", () => { const cancelled = buildDanfeHtml({ nfeProcXml: NFE_PROC, cancelled: true, cancellationProtocol: "143260000000099" }); assert.match(cancelled, /CANCELADA/); assert.match(cancelled, /Protocolo do evento: 143260000000099/i); });
+test("DANFE de referência pagina automaticamente notas com muitos itens", () => { const extraItems = Array.from({ length: 34 }, (_, index) => `<det nItem="${index + 2}"><prod><cProd>P${String(index + 2).padStart(3, "0")}</cProd><xProd>Produto adicional ${index + 2} com descrição suficiente para validar quebra de linha e paginação controlada</xProd><NCM>84713012</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom><vUnCom>10.0000000000</vUnCom><vProd>10.00</vProd></prod><imposto><ICMS><ICMSSN102><orig>0</orig><CSOSN>102</CSOSN></ICMSSN102></ICMS></imposto></det>`).join(""); const manyItemsXml = NFE_PROC.replace("    <total><ICMSTot>", `${extraItems}\n    <total><ICMSTot>`); const html = buildDanfeHtml({ nfeProcXml: manyItemsXml }); assert.match(html, /FOLHA 01\/\d+/i); assert.match(html, /FOLHA 02\/\d+/i); assert.match(html, /Continuação dos produtos\/serviços/i); assert.ok((html.match(/class="page"/g) || []).length >= 2); });

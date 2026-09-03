@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld("sevenDesktop", {
   fiscalConfigGet: (section) => ipcRenderer.invoke("seven:fiscal-config-get", section),
   fiscalConfigSet: (section, payload, actor) => ipcRenderer.invoke("seven:fiscal-config-set", section, payload, actor),
   fiscalConfigAudit: (limit) => ipcRenderer.invoke("seven:fiscal-config-audit", limit),
+  companyEstablishments: (request) => ipcRenderer.invoke("seven:company-establishments", request),
   onStatus: (callback) => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on("seven:status", listener);
