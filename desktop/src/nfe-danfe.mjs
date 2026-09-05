@@ -1,53 +1,35 @@
 import { buildReferenceDanfeFitHtml, extractReferenceDanfeData } from "./nfe-danfe-reference-fit.mjs";
+import { resolveCompanyLogo } from "./company-logo-store.mjs";
+
 export { encodeCode128, code128Svg, parseNfeProc } from "./nfe-danfe-core.mjs";
 export { extractReferenceDanfeData };
 
-const VEHICLE_MARK = "=== DADOS DOS VEÍCULOS ===";
-const esc = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
+const validLogo = (value) => {
+  const raw = String(value || "").trim();
+  return raw.length <= 900_000 && /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/i.test(raw) ? raw : "";
+};
 
-function vehicleBlocks(additional) {
-  const raw = String(additional || "");
-  if (!raw.includes(VEHICLE_MARK)) return { base: raw, details: new Map() };
-  const [base, marked = ""] = raw.split(VEHICLE_MARK, 2);
-  const details = new Map();
-  const rx = /VEÍCULO\s+(\d+)\s+—[^\n]*\n([\s\S]*?)(?=\n\nVEÍCULO\s+\d+\s+—|$)/gi;
-  for (const match of marked.matchAll(rx)) {
-    const index = Number(match[1]);
-    const text = String(match[2] || "").trim().replace(/\s*\|\s*/g, "  •  ");
-    if (index > 0 && text) details.set(index, text);
-  }
-  return { base: base.trim(), details };
-}
-
-function applyVehicleItemDetails(html, data) {
-  const parsed = vehicleBlocks(data.additional);
-  let output = html;
-  if (data.additional && parsed.base !== data.additional) output = output.replace(esc(data.additional), esc(parsed.base));
-  if (!parsed.details.size) return output;
-  let row = 0;
-  output = output.replace(/<td class="desc">[\s\S]*?<\/td>/g, (cell) => {
-    row += 1;
-    const detail = parsed.details.get(row);
-    if (!detail) return cell;
-    return cell.replace("</td>", `<small class="vehicle-item-details">${esc(detail)}</small></td>`);
-  });
-  return output.replace("</head>", `<style>.products td.desc .vehicle-item-details{display:block;white-space:pre-line;margin-top:.55mm;padding-top:.55mm;border-top:.16mm solid #8b949e;font-size:4.25pt;line-height:1.25;font-weight:600}.products td.desc{white-space:normal!important}</style></head>`);
-}
-
-function applyIssuerLogo(html, data) {
-  const resolver = globalThis.__sevenCompanyLogoResolver;
-  const logo = typeof resolver === "function" ? String(resolver(data?.issuer?.taxId) || "") : "";
-  if (!/^data:image\/(?:png|jpeg|webp);base64,/i.test(logo)) return html;
-  const css = `<style>.issuer{background-image:url('${logo}');background-repeat:no-repeat;background-position:2mm center;background-size:12mm auto;padding:1.2mm 1.6mm 1.2mm 16.5mm!important;text-align:left!important;display:flex!important;flex-direction:column!important;justify-content:center!important}.issuer>span{font-size:5pt!important;color:#444}.issuer h1{font-size:8.9pt!important;margin:.2mm 0 .1mm!important;text-align:left!important}.issuer h2{font-size:5.8pt!important;margin:0 0 .35mm!important;text-align:left!important}.issuer p{font-size:4.55pt!important;line-height:1.12!important;margin:.06mm 0!important;text-align:left!important}</style>`;
-  return html.replace("</head>", `${css}</head>`);
+function applyIssuerLogo(html, logoDataUrl) {
+  const logo = validLogo(logoDataUrl);
+  if (!logo) return html;
+  let output = html.replace(
+    '<div class="issuer">',
+    `<div class="issuer issuer-with-logo"><img class="issuer-logo" src="${logo}" alt="Logotipo do emitente"><div class="issuer-copy">`,
+  );
+  output = output.replace('</div><div class="danfe">', '</div></div><div class="danfe">');
+  const css = `<style>
+.issuer.issuer-with-logo{display:grid!important;grid-template-columns:24mm minmax(0,1fr)!important;align-items:center!important;column-gap:2mm!important;padding:1mm 1.4mm!important;text-align:left!important;background:none!important}
+.issuer-logo{display:block;max-width:24mm;max-height:10mm;width:100%;height:auto;object-fit:contain;margin:0}
+.issuer-copy{min-width:0;display:flex;flex-direction:column;justify-content:center}
+.issuer-with-logo .issuer-copy>span{font-size:5pt!important;margin:0 0 .15mm!important}.issuer-with-logo .issuer-copy h1{font-size:8.1pt!important;line-height:1.05!important;margin:.08mm 0!important;text-align:left!important}.issuer-with-logo .issuer-copy h2{font-size:5.55pt!important;line-height:1.05!important;margin:.08mm 0 .2mm!important;text-align:left!important}.issuer-with-logo .issuer-copy p{font-size:4.45pt!important;line-height:1.08!important;margin:.05mm 0!important;text-align:left!important}
+</style>`;
+  return output.replace("</head>", `${css}</head>`);
 }
 
 export function buildDanfeHtml(options) {
   const data = extractReferenceDanfeData(options.nfeProcXml);
-  let html = buildReferenceDanfeFitHtml(options);
-  html = applyVehicleItemDetails(html, data);
-  html = applyIssuerLogo(html, data);
-  return html;
+  const logo = validLogo(options.logoDataUrl) || resolveCompanyLogo(data?.issuer?.taxId);
+  return applyIssuerLogo(buildReferenceDanfeFitHtml(options), logo);
 }
 
 export function extractClassicData(xml) {

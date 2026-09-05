@@ -1,0 +1,12 @@
+/* Seven ERP Automotivo 2.0 — ajustes nativos do DANFE */
+.ref-issuer.ref-issuer-has-logo{display:grid!important;grid-template-columns:24mm minmax(0,1fr)!important;align-items:center!important;column-gap:2mm!important;padding:1.1mm 1.5mm!important;text-align:left!important;background:none!important}
+.ref-issuer-logo{display:block!important;width:100%!important;max-width:24mm!important;max-height:11mm!important;object-fit:contain!important;object-position:center!important;margin:0!important}
+.ref-issuer-copy{min-width:0;display:flex;flex-direction:column;justify-content:center}
+.ref-issuer-has-logo .ref-issuer-copy>span{font-size:5.1pt!important;margin:0 0 .2mm!important}
+.ref-issuer-has-logo .ref-issuer-copy h1{font-size:8.2pt!important;line-height:1.05!important;margin:.1mm 0!important;white-space:normal!important}
+.ref-issuer-has-logo .ref-issuer-copy h2{font-size:5.6pt!important;line-height:1.05!important;margin:.1mm 0 .25mm!important;white-space:normal!important}
+.ref-issuer-has-logo .ref-issuer-copy p{font-size:4.45pt!important;line-height:1.08!important;margin:.06mm 0!important}
+.ref-desc small{white-space:pre-line!important;line-height:1.22!important;margin-top:.5mm!important;color:#111!important}
+.ref-simulation .ref-watermark{color:rgba(55,65,75,.16)!important;border-color:rgba(55,65,75,.13)!important;font-size:29pt!important;letter-spacing:.055em!important}
+.dealer-simulation-watermark{display:none!important}
+@media print{.ref-issuer.ref-issuer-has-logo{grid-template-columns:24mm minmax(0,1fr)!important}.ref-issuer-logo{max-width:24mm!important;max-height:10mm!important}.ref-simulation .ref-watermark{color:rgba(55,65,75,.15)!important;border-color:rgba(55,65,75,.12)!important}}

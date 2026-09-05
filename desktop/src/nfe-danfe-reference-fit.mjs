@@ -1,50 +1,15 @@
-import { existsSync, readFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { buildReferenceDanfeHtml, extractReferenceDanfeData } from "./nfe-danfe-reference.mjs";
 
 const FIT_CSS = `<style>
 .page{height:297mm;min-height:297mm!important;padding:3.5mm 4.5mm 3.5mm;font-size:6pt;display:flex;flex-direction:column;overflow:hidden}.receipt{height:14mm;flex:0 0 auto}.receipt-title{height:4.8mm;padding:.55mm .8mm;font-size:4.8pt}.receipt-sign{height:8.6mm}.receipt-sign>div{padding:.45mm .8mm}.receipt-nfe{padding:.6mm 1.5mm}.receipt-nfe b{font-size:7.8pt}.receipt-nfe strong{font-size:6.2pt}
 .header{height:36mm;margin-top:1mm;flex:0 0 auto}.issuer{padding:.8mm 1.4mm}.issuer>span{font-size:6.5pt}.issuer h1{font-size:9.4pt;margin:.45mm 0 .1mm}.issuer h2{font-size:6.6pt;margin:0 0 .35mm}.issuer p{margin:.15mm 0;font-size:5.1pt}.danfe{padding:.7mm 1mm}.danfe h2{font-size:13.5pt;margin:0 0 .25mm}.danfe p{font-size:4.8pt;margin:.15mm 0}.danfe .flow{font-size:5.3pt;line-height:1.35;margin:.25mm 0}.danfe .flow b{top:1.4mm;padding:.4mm 1mm;font-size:8.3pt}.danfe strong{font-size:6.6pt;line-height:1.25}.barcode{height:14.5mm;padding:.8mm 1.2mm .55mm}.access-key{height:8.8mm;padding:.5mm 1mm}.access-key b{font-size:5.8pt;margin-top:.35mm}.access p{font-size:4.8pt;line-height:1.15;margin:.7mm 1mm}
 .compact{margin-top:.65mm;flex:0 0 auto}.field{min-height:6.1mm;padding:.35mm .65mm}.field span,.access-key span,.additional span{font-size:4.15pt}.field b{font-size:5.9pt;line-height:1.08;margin-top:.2mm}.single-line{height:5.5mm;padding:.9mm 1.2mm;font-size:5.5pt;flex:0 0 auto}h3{font-size:5.1pt;margin:.75mm 0 -.15mm;flex:0 0 auto}
-.products{min-height:55mm;flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden}.products table{flex:0 0 auto;width:100%;table-layout:fixed}.products th,.products td{padding:.34mm .25mm}.products th{font-size:4.05pt;line-height:1.08;white-space:normal;overflow-wrap:normal;word-break:normal}.products td{font-size:4.75pt;height:5.8mm;line-height:1.12}.products td:not(:nth-child(2)){white-space:nowrap}.products td.desc b{font-size:5.05pt}.products td.desc small{font-size:4.15pt;margin-top:.2mm}.products th:nth-child(1){width:7%}.products th:nth-child(2){width:30%}.products th:nth-child(3){width:7%}.products th:nth-child(4){width:4.5%}.products th:nth-child(5){width:5%}.products th:nth-child(6){width:3.5%}.products th:nth-child(7){width:5.5%}.products th:nth-child(8){width:7%}.products th:nth-child(9){width:7.5%}.products th:nth-child(10){width:6%}.products th:nth-child(11){width:5.5%}.products th:nth-child(12){width:4.5%}.products th:nth-child(13){width:3.5%}.products th:nth-child(14){width:3.5%}.product-filler{flex:1 1 auto;min-height:10mm;background:linear-gradient(to right,transparent 0 6.94%,rgba(0,0,0,.34) 6.94% 7.06%,transparent 7.06% 36.94%,rgba(0,0,0,.34) 36.94% 37.06%,transparent 37.06% 43.94%,rgba(0,0,0,.34) 43.94% 44.06%,transparent 44.06% 48.44%,rgba(0,0,0,.34) 48.44% 48.56%,transparent 48.56% 53.44%,rgba(0,0,0,.34) 53.44% 53.56%,transparent 53.56% 56.94%,rgba(0,0,0,.34) 56.94% 57.06%,transparent 57.06% 62.44%,rgba(0,0,0,.34) 62.44% 62.56%,transparent 62.56% 69.44%,rgba(0,0,0,.34) 69.44% 69.56%,transparent 69.56% 76.94%,rgba(0,0,0,.34) 76.94% 77.06%,transparent 77.06% 82.94%,rgba(0,0,0,.34) 82.94% 83.06%,transparent 83.06% 88.44%,rgba(0,0,0,.34) 88.44% 88.56%,transparent 88.56% 92.94%,rgba(0,0,0,.34) 92.94% 93.06%,transparent 93.06% 96.44%,rgba(0,0,0,.34) 96.44% 96.56%,transparent 96.56% 100%)}
+.products{min-height:55mm;flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden}.products table{flex:0 0 auto;width:100%;table-layout:fixed}.products th,.products td{padding:.34mm .25mm}.products th{font-size:4.05pt;line-height:1.08;white-space:normal;overflow-wrap:normal;word-break:normal}.products td{font-size:4.75pt;height:5.8mm;line-height:1.12}.products td:not(:nth-child(2)){white-space:nowrap}.products td.desc b{font-size:5.05pt}.products td.desc small{font-size:4.15pt;margin-top:.2mm;white-space:pre-line;line-height:1.2}.products th:nth-child(1){width:7%}.products th:nth-child(2){width:30%}.products th:nth-child(3){width:7%}.products th:nth-child(4){width:4.5%}.products th:nth-child(5){width:5%}.products th:nth-child(6){width:3.5%}.products th:nth-child(7){width:5.5%}.products th:nth-child(8){width:7%}.products th:nth-child(9){width:7.5%}.products th:nth-child(10){width:6%}.products th:nth-child(11){width:5.5%}.products th:nth-child(12){width:4.5%}.products th:nth-child(13){width:3.5%}.products th:nth-child(14){width:3.5%}.product-filler{flex:1 1 auto;min-height:10mm;background:linear-gradient(to right,transparent 0 6.94%,rgba(0,0,0,.34) 6.94% 7.06%,transparent 7.06% 36.94%,rgba(0,0,0,.34) 36.94% 37.06%,transparent 37.06% 43.94%,rgba(0,0,0,.34) 43.94% 44.06%,transparent 44.06% 48.44%,rgba(0,0,0,.34) 48.44% 48.56%,transparent 48.56% 53.44%,rgba(0,0,0,.34) 53.44% 53.56%,transparent 53.56% 56.94%,rgba(0,0,0,.34) 56.94% 57.06%,transparent 57.06% 62.44%,rgba(0,0,0,.34) 62.44% 62.56%,transparent 62.56% 69.44%,rgba(0,0,0,.34) 69.44% 69.56%,transparent 69.56% 76.94%,rgba(0,0,0,.34) 76.94% 77.06%,transparent 77.06% 82.94%,rgba(0,0,0,.34) 82.94% 83.06%,transparent 83.06% 88.44%,rgba(0,0,0,.34) 88.44% 88.56%,transparent 88.56% 92.94%,rgba(0,0,0,.34) 92.94% 93.06%,transparent 93.06% 96.44%,rgba(0,0,0,.34) 96.44% 96.56%,transparent 96.56% 100%)}
 .additional{height:25mm;flex:0 0 25mm}.additional>div{padding:.65mm .9mm}.additional p{font-size:4.8pt;line-height:1.15;margin:.45mm 0;white-space:pre-line}.additional span{font-size:4.2pt}footer{font-size:4.5pt;margin-top:.45mm;flex:0 0 auto}footer b{font-size:6.3pt}.watermark{font-size:27pt}
-.issuer-with-logo{padding:.35mm 1.2mm}.issuer-logo{display:block;max-width:33mm;max-height:6.8mm;object-fit:contain;margin:0 auto .2mm}.issuer-with-logo>span{font-size:5.2pt}.issuer-with-logo h1{font-size:8.4pt;margin:.15mm 0 .05mm}.issuer-with-logo h2{font-size:5.9pt;margin:0 0 .15mm}.issuer-with-logo p{font-size:4.55pt;margin:.08mm 0}
 </style>`;
 
-const normalizeTaxId = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-const safeLogo = (value) => {
-  const raw = String(value || "").trim();
-  return raw.length <= 900000 && /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/i.test(raw) ? raw : "";
-};
-function logoFileCandidates() {
-  const names = ["Seven ERP", "seven-erp-desktop", "seven-erp"];
-  const roots = [];
-  if (process.platform === "win32" && process.env.APPDATA) roots.push(process.env.APPDATA);
-  if (process.platform === "darwin") roots.push(path.join(os.homedir(), "Library", "Application Support"));
-  if (process.platform !== "win32" && process.platform !== "darwin") roots.push(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"));
-  return roots.flatMap((root) => names.map((name) => path.join(root, name, "company-logos.json")));
-}
-function readLogoForTaxId(taxId) {
-  const key = normalizeTaxId(taxId); if (key.length !== 14) return "";
-  for (const file of logoFileCandidates()) {
-    try {
-      if (!existsSync(file)) continue;
-      const parsed = JSON.parse(readFileSync(file, "utf8"));
-      const logo = safeLogo(parsed?.logos?.[key]?.logoDataUrl);
-      if (logo) return logo;
-    } catch {}
-  }
-  return "";
-}
-
 export { extractReferenceDanfeData };
+
 export function buildReferenceDanfeFitHtml(options) {
-  let html = buildReferenceDanfeHtml(options);
-  let logo = safeLogo(options?.logoDataUrl);
-  if (!logo && options?.nfeProcXml) {
-    try { logo = readLogoForTaxId(extractReferenceDanfeData(options.nfeProcXml)?.issuer?.taxId); } catch {}
-  }
-  if (logo) html = html.replaceAll('<div class="issuer">', `<div class="issuer issuer-with-logo"><img class="issuer-logo" src="${logo}" alt="Logotipo do emitente">`);
-  return html.replace("</head>", `${FIT_CSS}</head>`);
+  return buildReferenceDanfeHtml(options).replace("</head>", `${FIT_CSS}</head>`);
 }
