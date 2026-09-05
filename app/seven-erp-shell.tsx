@@ -30,6 +30,7 @@ import "./nfe-dealership-danfe.css";
 import "./os-preview.css";
 import "./platform-shortcuts.css";
 import "./company-establishments.css";
+import "./company-logo-manager.css";
 
 type EnhancedModule = "service" | "osDesigner" | "documents" | "fiscalSettings" | "catalog" | "integrations" | "dfe" | "devices" | "company" | "nfe" | null;
 
