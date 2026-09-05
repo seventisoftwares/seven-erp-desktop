@@ -1,15 +1,9 @@
 import { app, ipcMain } from "electron";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { cleanTaxId, companyLogoEntry, replaceCompanyLogoCache, validLogo } from "./company-logo-store.mjs";
 
 const FILE_NAME = "company-logos.json";
-const MAX_LOGO_LENGTH = 900_000;
-const cleanTaxId = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-const validLogo = (value) => {
-  const raw = String(value || "").trim();
-  return raw.length <= MAX_LOGO_LENGTH && /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/i.test(raw) ? raw : "";
-};
-let logoCache = {};
 let cacheReady = false;
 
 function targetFile() { return path.join(app.getPath("userData"), FILE_NAME); }
@@ -23,7 +17,7 @@ async function readState() {
 }
 async function refreshCache() {
   const state = await readState();
-  logoCache = state.logos || {};
+  replaceCompanyLogoCache(state.logos || {});
   cacheReady = true;
   return state;
 }
@@ -33,22 +27,13 @@ async function writeState(state) {
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(temp, JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2), { encoding: "utf8", mode: 0o600 });
   await rename(temp, file);
-  logoCache = state.logos || {};
+  replaceCompanyLogoCache(state.logos || {});
   cacheReady = true;
-}
-
-export function resolveCompanyLogo(taxId) {
-  return validLogo(logoCache[cleanTaxId(taxId)]?.logoDataUrl);
 }
 
 export async function getCompanyLogo(taxId) {
   if (!cacheReady) await refreshCache();
-  const normalized = cleanTaxId(taxId);
-  return {
-    taxId: normalized,
-    logoDataUrl: resolveCompanyLogo(normalized),
-    updatedAt: logoCache[normalized]?.updatedAt || null,
-  };
+  return companyLogoEntry(taxId);
 }
 
 app.whenReady().then(() => refreshCache()).catch(() => undefined);
@@ -58,7 +43,7 @@ ipcMain.handle("seven:company-logo", async (_event, request = {}) => {
   const taxId = cleanTaxId(request.taxId);
   if (taxId.length !== 14) return { ok: false, error: "Informe o CNPJ do estabelecimento para vincular o logotipo." };
   const state = await refreshCache();
-  if (action === "get") return { ok: true, taxId, logoDataUrl: resolveCompanyLogo(taxId), updatedAt: state.logos[taxId]?.updatedAt || null };
+  if (action === "get") return { ok: true, ...companyLogoEntry(taxId) };
   if (action === "remove") {
     delete state.logos[taxId];
     await writeState(state);
@@ -69,7 +54,7 @@ ipcMain.handle("seven:company-logo", async (_event, request = {}) => {
     if (!logoDataUrl) return { ok: false, error: "Logo inválido. Use PNG, JPG/JPEG ou WebP com tamanho otimizado." };
     state.logos[taxId] = { logoDataUrl, updatedAt: new Date().toISOString() };
     await writeState(state);
-    return { ok: true, taxId, logoDataUrl, updatedAt: state.logos[taxId].updatedAt };
+    return { ok: true, ...companyLogoEntry(taxId) };
   }
   return { ok: false, error: "Ação de logotipo não reconhecida." };
 });
