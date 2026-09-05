@@ -26,6 +26,7 @@ import "./nfe-danfe-preview-v3.css";
 import "./nfe-danfe-reference-preview.css";
 import "./nfe-danfe-reference-fit.css";
 import "./nfe-dealership.css";
+import "./nfe-dealership-danfe.css";
 import "./os-preview.css";
 import "./platform-shortcuts.css";
 import "./company-establishments.css";
