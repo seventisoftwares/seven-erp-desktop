@@ -1,5 +1,5 @@
 import { buildReferenceDanfeFitHtml, extractReferenceDanfeData } from "./nfe-danfe-reference-fit.mjs";
-import { resolveCompanyLogo } from "./company-logo-bootstrap.mjs";
+import { resolveCompanyLogo } from "./company-logo-store.mjs";
 
 export { encodeCode128, code128Svg, parseNfeProc } from "./nfe-danfe-core.mjs";
 export { extractReferenceDanfeData };
