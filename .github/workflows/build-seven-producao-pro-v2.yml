@@ -1,4 +1,4 @@
-name: Build Seven Producao Pro v2
+name: Build Seven Producao Pro FINAL Windows
 
 on:
   push:
@@ -11,68 +11,106 @@ permissions:
 
 jobs:
   windows:
-    name: Windows x64 installer
+    name: Windows x64 final premium installer
     runs-on: windows-latest
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node 22
+        uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Rebuild and validate source
+
+      - name: Rebuild validated application source
         shell: pwsh
         run: |
           $b64 = (Get-Content -Raw 'build-assets/chunk00.txt') + (Get-Content -Raw 'build-assets/chunk01.txt') + (Get-Content -Raw 'build-assets/chunk02.txt') + (Get-Content -Raw 'build-assets/chunk03.txt') + (Get-Content -Raw 'build-assets/chunk04.txt')
           $b64 = $b64 -replace '\s',''
           [System.IO.File]::WriteAllBytes('source.zip', [System.Convert]::FromBase64String($b64))
           $hash = (Get-FileHash source.zip -Algorithm SHA256).Hash.ToLower()
-          Write-Host "SHA256=$hash"
+          Write-Host "SOURCE SHA256=$hash"
           if ($hash -ne '25c53e1bff55a3a0437d9659e7387242c40e7d03899f7f6a7d70cc81c8947485') { throw "Source checksum mismatch" }
           New-Item -ItemType Directory -Force build-app | Out-Null
           Expand-Archive -Path source.zip -DestinationPath build-app -Force
-      - name: Install dependencies
+
+      - name: Generate premium Seven TI installer identity
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --no-cache-dir pillow
+          python build-assets/prepare-premium-installer.py build-app
+          if (!(Test-Path 'build-app/build/installerSidebar.bmp')) { throw 'installerSidebar.bmp not generated' }
+          if (!(Test-Path 'build-app/build/installerHeader.bmp')) { throw 'installerHeader.bmp not generated' }
+          if (!(Test-Path 'build-app/build/installerIcon.ico')) { throw 'installerIcon.ico not generated' }
+          if (!(Test-Path 'build-app/build/icon.png')) { throw 'icon.png not generated' }
+
+      - name: Finalize Windows product metadata
+        shell: pwsh
+        working-directory: build-app
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          $pkg.description = 'Gestão profissional de custos, produção, estoque e resultados'
+          $pkg.author = 'Seven TI Tecnologia & Serviços LTDA'
+          $pkg.build.productName = 'Seven Produção Pro'
+          $pkg.build.artifactName = 'Seven-Producao-Pro-Setup-${version}-x64.${ext}'
+          if (-not $pkg.build.PSObject.Properties.Name.Contains('copyright')) {
+            $pkg.build | Add-Member -NotePropertyName copyright -NotePropertyValue 'Copyright © 2026 Seven TI Tecnologia & Serviços LTDA'
+          } else {
+            $pkg.build.copyright = 'Copyright © 2026 Seven TI Tecnologia & Serviços LTDA'
+          }
+          if (-not $pkg.build.win.PSObject.Properties.Name.Contains('legalTrademarks')) {
+            $pkg.build.win | Add-Member -NotePropertyName legalTrademarks -NotePropertyValue 'Seven TI Tecnologia & Serviços LTDA'
+          } else {
+            $pkg.build.win.legalTrademarks = 'Seven TI Tecnologia & Serviços LTDA'
+          }
+          $pkg.build.nsis.shortcutName = 'Seven Produção Pro'
+          $pkg.build.nsis.uninstallDisplayName = 'Seven Produção Pro 2.0'
+          $pkg | ConvertTo-Json -Depth 30 | Set-Content package.json -Encoding UTF8
+          @'
+          LICENÇA DE USO — SEVEN PRODUÇÃO PRO
+
+          Copyright © 2026 Seven TI Tecnologia & Serviços LTDA.
+          Todos os direitos reservados.
+
+          Este software é fornecido para uso autorizado do cliente e não pode ser redistribuído, revendido, copiado ou modificado sem autorização da Seven TI Tecnologia & Serviços LTDA.
+          '@ | Set-Content LICENSE.txt -Encoding UTF8
+          $pkg2 = Get-Content package.json -Raw | ConvertFrom-Json
+          if (-not $pkg2.build.nsis.PSObject.Properties.Name.Contains('license')) {
+            $pkg2.build.nsis | Add-Member -NotePropertyName license -NotePropertyValue 'LICENSE.txt'
+          } else {
+            $pkg2.build.nsis.license = 'LICENSE.txt'
+          }
+          $pkg2 | ConvertTo-Json -Depth 30 | Set-Content package.json -Encoding UTF8
+          node --check main.js
+          node --check app.js
+          Write-Host 'Final package.json:'
+          Get-Content package.json
+
+      - name: Install Electron build dependencies
         working-directory: build-app
         run: npm install --no-audit --no-fund
-      - name: Build Windows NSIS
+
+      - name: Build final NSIS EXE
         working-directory: build-app
         run: npx electron-builder --win nsis --x64
-      - name: Upload Windows installer
+
+      - name: Validate generated EXE
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem build-app/dist/*.exe | Select-Object -First 1
+          if (-not $exe) { throw 'Final EXE not found' }
+          if ($exe.Length -lt 50000000) { throw "Unexpectedly small EXE: $($exe.Length) bytes" }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          Write-Host "FINAL EXE: $($exe.Name)"
+          Write-Host "SIZE: $($exe.Length) bytes"
+          Write-Host "SHA256: $hash"
+
+      - name: Upload final Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: Seven-Producao-Pro-v2-Windows-x64
+          name: Seven-Producao-Pro-v2-FINAL-Windows-x64
           path: build-app/dist/*.exe
           if-no-files-found: error
-
-  macos:
-    name: macOS universal installer
-    runs-on: macos-latest
-    env:
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Rebuild and validate source
-        run: |
-          cat build-assets/chunk00.txt build-assets/chunk01.txt build-assets/chunk02.txt build-assets/chunk03.txt build-assets/chunk04.txt | tr -d '\r\n\t ' > source.b64
-          node -e "const fs=require('fs');const s=fs.readFileSync('source.b64','utf8').trim();fs.writeFileSync('source.zip',Buffer.from(s,'base64'));"
-          echo "SHA256=$(shasum -a 256 source.zip | awk '{print $1}')"
-          test "$(shasum -a 256 source.zip | awk '{print $1}')" = "25c53e1bff55a3a0437d9659e7387242c40e7d03899f7f6a7d70cc81c8947485"
-          mkdir -p build-app
-          unzip -q source.zip -d build-app
-      - name: Install dependencies
-        working-directory: build-app
-        run: npm install --no-audit --no-fund
-      - name: Build macOS DMG and ZIP universal
-        working-directory: build-app
-        run: npx electron-builder --mac dmg zip --universal
-      - name: Upload macOS installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: Seven-Producao-Pro-v2-macOS-Universal
-          path: |
-            build-app/dist/*.dmg
-            build-app/dist/*.zip
-          if-no-files-found: error
+          compression-level: 0
