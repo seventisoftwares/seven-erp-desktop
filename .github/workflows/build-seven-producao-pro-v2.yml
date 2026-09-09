@@ -1,0 +1,68 @@
+name: Build Seven Producao Pro v2
+
+on:
+  push:
+    branches:
+      - build-seven-producao-pro-v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 installer
+    runs-on: windows-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Extract source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build-app | Out-Null
+          Expand-Archive -Path build-assets/seven-producao-pro-v2-build-source.zip -DestinationPath build-app -Force
+      - name: Install dependencies
+        working-directory: build-app
+        run: npm install --no-audit --no-fund
+      - name: Build Windows NSIS
+        working-directory: build-app
+        run: npx electron-builder --win nsis --x64
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Seven-Producao-Pro-v2-Windows-x64
+          path: build-app/dist/*.exe
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal installer
+    runs-on: macos-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Extract source
+        run: |
+          mkdir -p build-app
+          unzip -q build-assets/seven-producao-pro-v2-build-source.zip -d build-app
+      - name: Install dependencies
+        working-directory: build-app
+        run: npm install --no-audit --no-fund
+      - name: Build macOS DMG and ZIP universal
+        working-directory: build-app
+        run: npx electron-builder --mac dmg zip --universal
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Seven-Producao-Pro-v2-macOS-Universal
+          path: |
+            build-app/dist/*.dmg
+            build-app/dist/*.zip
+          if-no-files-found: error
