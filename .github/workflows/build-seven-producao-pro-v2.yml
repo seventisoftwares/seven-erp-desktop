@@ -20,11 +20,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Rebuild source ZIP
+      - name: Rebuild and validate source
         shell: pwsh
         run: |
-          $b64 = (Get-Content -Raw 'build-assets/seven-producao-pro-v2-build-source.zip.b64').Trim()
+          $b64 = (Get-Content -Raw 'build-assets/chunk00.txt') + (Get-Content -Raw 'build-assets/chunk01.txt') + (Get-Content -Raw 'build-assets/chunk02.txt') + (Get-Content -Raw 'build-assets/chunk03.txt') + (Get-Content -Raw 'build-assets/chunk04.txt')
+          $b64 = $b64 -replace '\s',''
           [System.IO.File]::WriteAllBytes('source.zip', [System.Convert]::FromBase64String($b64))
+          $hash = (Get-FileHash source.zip -Algorithm SHA256).Hash.ToLower()
+          Write-Host "SHA256=$hash"
+          if ($hash -ne '25c53e1bff55a3a0437d9659e7387242c40e7d03899f7f6a7d70cc81c8947485') { throw "Source checksum mismatch" }
           New-Item -ItemType Directory -Force build-app | Out-Null
           Expand-Archive -Path source.zip -DestinationPath build-app -Force
       - name: Install dependencies
@@ -50,9 +54,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Rebuild source ZIP
+      - name: Rebuild and validate source
         run: |
-          node -e "const fs=require('fs'); const b64=fs.readFileSync('build-assets/seven-producao-pro-v2-build-source.zip.b64','utf8').trim(); fs.writeFileSync('source.zip', Buffer.from(b64,'base64'));"
+          cat build-assets/chunk00.txt build-assets/chunk01.txt build-assets/chunk02.txt build-assets/chunk03.txt build-assets/chunk04.txt | tr -d '\r\n\t ' > source.b64
+          base64 --decode source.b64 > source.zip
+          echo "SHA256=$(shasum -a 256 source.zip | awk '{print $1}')"
+          test "$(shasum -a 256 source.zip | awk '{print $1}')" = "25c53e1bff55a3a0437d9659e7387242c40e7d03899f7f6a7d70cc81c8947485"
           mkdir -p build-app
           unzip -q source.zip -d build-app
       - name: Install dependencies
