@@ -20,11 +20,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Extract source
+      - name: Rebuild source ZIP
         shell: pwsh
         run: |
+          $b64 = (Get-Content -Raw 'build-assets/seven-producao-pro-v2-build-source.zip.b64').Trim()
+          [System.IO.File]::WriteAllBytes('source.zip', [System.Convert]::FromBase64String($b64))
           New-Item -ItemType Directory -Force build-app | Out-Null
-          Expand-Archive -Path build-assets/seven-producao-pro-v2-build-source.zip -DestinationPath build-app -Force
+          Expand-Archive -Path source.zip -DestinationPath build-app -Force
       - name: Install dependencies
         working-directory: build-app
         run: npm install --no-audit --no-fund
@@ -48,10 +50,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Extract source
+      - name: Rebuild source ZIP
         run: |
+          node -e "const fs=require('fs'); const b64=fs.readFileSync('build-assets/seven-producao-pro-v2-build-source.zip.b64','utf8').trim(); fs.writeFileSync('source.zip', Buffer.from(b64,'base64'));"
           mkdir -p build-app
-          unzip -q build-assets/seven-producao-pro-v2-build-source.zip -d build-app
+          unzip -q source.zip -d build-app
       - name: Install dependencies
         working-directory: build-app
         run: npm install --no-audit --no-fund
